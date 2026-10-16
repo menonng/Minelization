@@ -24,6 +24,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
     internal val aiMemory = HashMap<Long, Long>()
 
     var presence: PresenceProvider = PresenceProvider { _, _ -> 0 }
+    var construction: ((Nation, BuildingKind) -> Outcome)? = null
     var minNations = 4
     var spawnCenter = 0L
     var spawnRadius = 60

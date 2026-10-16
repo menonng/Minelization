@@ -1,0 +1,11 @@
+{
+  "key.category.grandstrategy.work": "Grand Strategy Work Orders",
+  "key.grandstrategy.work_mode": "Work designation mode",
+  "key.grandstrategy.tool": "Cycle tool",
+  "key.grandstrategy.prev": "Previous building",
+  "key.grandstrategy.next": "Next building",
+  "key.grandstrategy.rotate": "Rotate",
+  "key.grandstrategy.conscript": "Toggle conscription",
+  "key.grandstrategy.confirm": "Issue order",
+  "key.grandstrategy.clear": "Clear selection"
+}

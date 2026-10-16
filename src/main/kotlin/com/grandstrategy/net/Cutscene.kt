@@ -56,3 +56,23 @@ data class CutsceneDonePayload(val id: Int) : CustomPacketPayload {
             StreamCodec.composite(ByteBufCodecs.VAR_INT, CutsceneDonePayload::id, ::CutsceneDonePayload)
     }
 }
+
+data class ClientMessagePayload(val json: String) : CustomPacketPayload {
+    override fun type(): CustomPacketPayload.Type<ClientMessagePayload> = TYPE
+
+    companion object {
+        val TYPE = CustomPacketPayload.Type<ClientMessagePayload>(Identifier.fromNamespaceAndPath("grandstrategy", "client_message"))
+        val CODEC: StreamCodec<RegistryFriendlyByteBuf, ClientMessagePayload> =
+            StreamCodec.composite(ByteBufCodecs.STRING_UTF8, ClientMessagePayload::json, ::ClientMessagePayload)
+    }
+}
+
+data class ServerMessagePayload(val json: String) : CustomPacketPayload {
+    override fun type(): CustomPacketPayload.Type<ServerMessagePayload> = TYPE
+
+    companion object {
+        val TYPE = CustomPacketPayload.Type<ServerMessagePayload>(Identifier.fromNamespaceAndPath("grandstrategy", "server_message"))
+        val CODEC: StreamCodec<RegistryFriendlyByteBuf, ServerMessagePayload> =
+            StreamCodec.composite(ByteBufCodecs.STRING_UTF8, ServerMessagePayload::json, ::ServerMessagePayload)
+    }
+}

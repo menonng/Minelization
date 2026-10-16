@@ -55,6 +55,7 @@ object Actions {
 
             is Action.Build -> {
                 if (nation.totalFacilities() >= nation.claims.size) return Outcome.fail("시설 수는 영토 수(${nation.claims.size})를 넘을 수 없다.")
+                sim.construction?.let { return it(nation, BuildingKind.of(action.facility)) }
                 val cost = Balance.facilityCost(nation, action.facility)
                 if (!canAfford(nation, cost)) return Outcome.fail("자원이 부족하다: ${describe(cost)}")
                 pay(nation, cost)

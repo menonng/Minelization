@@ -2,7 +2,9 @@ package com.grandstrategy
 
 import com.grandstrategy.mc.BalanceFile
 import com.grandstrategy.mc.CutsceneGuard
+import com.grandstrategy.net.ClientMessagePayload
 import com.grandstrategy.net.CutsceneDonePayload
+import com.grandstrategy.net.ServerMessagePayload
 import com.grandstrategy.net.PlayCutscenePayload
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry
@@ -30,6 +32,11 @@ object GrandStrategy : ModInitializer {
         BalanceFile.loadAtStartup()
         PayloadTypeRegistry.clientboundPlay().register(PlayCutscenePayload.TYPE, PlayCutscenePayload.CODEC)
         PayloadTypeRegistry.serverboundPlay().register(CutsceneDonePayload.TYPE, CutsceneDonePayload.CODEC)
+        PayloadTypeRegistry.serverboundPlay().register(ClientMessagePayload.TYPE, ClientMessagePayload.CODEC)
+        PayloadTypeRegistry.clientboundPlay().register(ServerMessagePayload.TYPE, ServerMessagePayload.CODEC)
+        ServerPlayNetworking.registerGlobalReceiver(ClientMessagePayload.TYPE) { payload, context ->
+            runtime?.workService?.handle(context.player(), payload.json)
+        }
         ServerPlayNetworking.registerGlobalReceiver(CutsceneDonePayload.TYPE) { payload, context ->
             val player = context.player()
             CutsceneGuard.finish(player.level().server, player, payload.id)
@@ -69,6 +76,7 @@ object GrandStrategy : ModInitializer {
             CutsceneGuard.release(server, handler.player)
             runtime?.hooks?.forget(handler.player.uuid)
             runtime?.agentDisplay?.removePlayer(handler.player.uuid)
+            runtime?.workService?.forget(handler.player.uuid)
         }
 
         ServerLifecycleEvents.SERVER_STOPPING.register { server ->

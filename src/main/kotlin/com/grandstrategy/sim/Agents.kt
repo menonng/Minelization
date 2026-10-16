@@ -30,6 +30,7 @@ class Agents(initial: Int = 1024) {
     var lastStep = LongArray(initial); private set
     var nation = IntArray(initial); private set
     var uid = IntArray(initial); private set
+    var task = IntArray(initial); private set
     var job = ByteArray(initial); private set
     var state = ByteArray(initial); private set
     var alive = BooleanArray(initial); private set
@@ -52,7 +53,7 @@ class Agents(initial: Int = 1024) {
         targetX = targetX.copyOf(n); targetZ = targetZ.copyOf(n)
         homeX = homeX.copyOf(n); homeZ = homeZ.copyOf(n)
         speed = speed.copyOf(n); timer = timer.copyOf(n); lastStep = lastStep.copyOf(n)
-        nation = nation.copyOf(n); uid = uid.copyOf(n)
+        nation = nation.copyOf(n); uid = uid.copyOf(n); task = task.copyOf(n)
         job = job.copyOf(n); state = state.copyOf(n); alive = alive.copyOf(n)
         capacity = n
     }
@@ -71,6 +72,7 @@ class Agents(initial: Int = 1024) {
         lastStep[i] = now
         nation[i] = owner
         uid[i] = nextUid++
+        task[i] = 0
         job[i] = work.ordinal.toByte()
         state[i] = AgentState.REST
         alive[i] = true
@@ -95,6 +97,21 @@ class Agents(initial: Int = 1024) {
             targetZ[i] = hz
             state[i] = AgentState.TO_HOME
         }
+    }
+
+    fun assignTask(i: Int, order: Int, siteX: Float, siteZ: Float) {
+        task[i] = order
+        targetX[i] = siteX
+        targetZ[i] = siteZ
+        state[i] = AgentState.TO_WORK
+    }
+
+    fun releaseTask(i: Int) {
+        if (task[i] == 0) return
+        task[i] = 0
+        targetX[i] = homeX[i]
+        targetZ[i] = homeZ[i]
+        state[i] = AgentState.TO_HOME
     }
 
     fun step(i: Int, now: Long, picker: WorkPicker, rng: Random) {
@@ -129,7 +146,7 @@ class Agents(initial: Int = 1024) {
                     z[i] = targetZ[i]
                     if (state[i] == AgentState.TO_WORK) {
                         state[i] = AgentState.WORK
-                        timer[i] = 15f + rng.nextFloat() * 30f
+                        timer[i] = if (task[i] != 0) 1e9f else 15f + rng.nextFloat() * 30f
                     } else {
                         state[i] = AgentState.REST
                         timer[i] = 10f + rng.nextFloat() * 25f
@@ -200,14 +217,18 @@ class AgentPopulation(val sim: Simulation) {
             counts.merge(agents.nation[i], 1, Int::plus)
         }
         val want = desired()
-        var budget = tuning.spawnPerTurn
+        val deficits = want.mapValues { (id, target) -> (target - (counts[id] ?: 0)).coerceAtLeast(0) }
+        val totalDeficit = deficits.values.sum().coerceAtLeast(1)
+        val budget = tuning.spawnPerTurn
         for ((id, target) in want) {
             var have = counts[id] ?: 0
-            while (have < target && budget > 0) {
+            val deficit = deficits[id] ?: 0
+            var share = if (deficit == 0) 0 else maxOf(minOf(deficit, 20), (budget.toLong() * deficit / totalDeficit).toInt())
+            while (have < target && share > 0) {
                 val (hx, hz) = randomHome(id, rng) ?: break
                 agents.add(id, hx, hz, pickJob(rng), rng, tick)
                 have++
-                budget--
+                share--
             }
             if (have > target) {
                 var excess = have - target

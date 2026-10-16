@@ -37,6 +37,83 @@ enum class Facility(val label: String, val boosts: Resource?) {
     WALLS("성벽", null)
 }
 
+enum class BuildingKind(val label: String, val facility: Facility?) {
+    HOUSE("주택", null),
+    FARM("농장", Facility.FARM),
+    LUMBER_CAMP("벌목장", Facility.LUMBER_CAMP),
+    QUARRY("채석장", Facility.QUARRY),
+    MINE("광산", Facility.MINE),
+    MARKET("시장", Facility.MARKET),
+    LIBRARY("도서관", Facility.LIBRARY),
+    BARRACKS("병영", Facility.BARRACKS),
+    WALLS("성벽", Facility.WALLS),
+    TEMPLE("신전", null),
+    OTHER("기타 건물", null);
+
+    companion object {
+        fun of(facility: Facility): BuildingKind = entries.first { it.facility == facility }
+    }
+}
+
+enum class WorkType(val label: String) { BUILD("건축"), DEMOLISH("철거"), FLATTEN("평탄화") }
+
+@Serializable
+data class Box(val minX: Int, val minY: Int, val minZ: Int, val maxX: Int, val maxY: Int, val maxZ: Int) {
+    val sizeX get() = maxX - minX + 1
+    val sizeY get() = maxY - minY + 1
+    val sizeZ get() = maxZ - minZ + 1
+    val volume get() = sizeX.toLong() * sizeY * sizeZ
+    val centerX get() = (minX + maxX) / 2.0 + 0.5
+    val centerZ get() = (minZ + maxZ) / 2.0 + 0.5
+
+    fun chunks(): List<Long> {
+        val out = ArrayList<Long>()
+        for (cx in (minX shr 4)..(maxX shr 4)) for (cz in (minZ shr 4)..(maxZ shr 4)) out += Chunks.pack(cx, cz)
+        return out
+    }
+
+    fun intersects(o: Box) = minX <= o.maxX && maxX >= o.minX && minY <= o.maxY && maxY >= o.minY && minZ <= o.maxZ && maxZ >= o.minZ
+
+    fun contains(x: Int, y: Int, z: Int) = x in minX..maxX && y in minY..maxY && z in minZ..maxZ
+
+    companion object {
+        fun of(x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int) =
+            Box(minOf(x1, x2), minOf(y1, y2), minOf(z1, z2), maxOf(x1, x2), maxOf(y1, y2), maxOf(z1, z2))
+    }
+}
+
+@Serializable
+class Building(
+    val id: Int,
+    var nation: Int?,
+    var kind: BuildingKind,
+    var box: Box,
+    val template: String? = null,
+    var complete: Boolean = false,
+    val detected: Boolean = false
+)
+
+@Serializable
+class WorkOrder(
+    val id: Int,
+    val nation: Int,
+    val type: WorkType,
+    val box: Box,
+    val kind: BuildingKind? = null,
+    val template: String? = null,
+    val rotation: Int = 0,
+    val baseY: Int = Int.MIN_VALUE,
+    val conscript: Boolean = false,
+    val workersWanted: Int = 8,
+    val building: Int? = null,
+    val by: String? = null,
+    val createdTurn: Long = 0,
+    var progress: Long = 0,
+    var total: Long = 0,
+    var abstractWork: Double = 0.0,
+    var pendingPlacement: Boolean = false
+)
+
 enum class TechBranch(val label: String, val effect: String) {
     AGRICULTURE("농업", "식량 +10%"),
     MINING("광업", "석재·철·금 +10%"),
@@ -195,6 +272,10 @@ class WorldState(
     val relations: MutableMap<Long, Relation> = mutableMapOf(),
     val wars: MutableMap<Int, War> = linkedMapOf(),
     val proposals: MutableMap<Int, Proposal> = linkedMapOf(),
+    var nextBuildingId: Int = 1,
+    var nextOrderId: Int = 1,
+    val buildings: MutableMap<Int, Building> = linkedMapOf(),
+    val orders: MutableMap<Int, WorkOrder> = linkedMapOf(),
     val events: MutableList<GameEvent> = mutableListOf()
 ) {
     fun alive(): List<Nation> = nations.values.filter { it.alive }

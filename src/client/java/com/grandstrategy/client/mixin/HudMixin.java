@@ -17,4 +17,9 @@ public abstract class HudMixin {
             info.cancel();
         }
     }
+
+    @Inject(method = "extractRenderState(Lnet/minecraft/client/gui/GuiGraphicsExtractor;Lnet/minecraft/client/DeltaTracker;)V", at = @At("TAIL"))
+    private void grandstrategy$workHud(GuiGraphicsExtractor graphics, DeltaTracker delta, CallbackInfo info) {
+        com.grandstrategy.client.work.WorkMode.INSTANCE.hud(graphics);
+    }
 }

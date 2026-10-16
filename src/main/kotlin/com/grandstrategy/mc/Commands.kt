@@ -174,8 +174,73 @@ object GsCommands {
             }))
             .then(literal("accept").then(argument("id", IntegerArgumentType.integer()).executes { answer(it, true) }))
             .then(literal("decline").then(argument("id", IntegerArgumentType.integer()).executes { answer(it, false) }))
+            .then(workCommands())
             .then(admin())
         dispatcher.register(gs)
+    }
+
+    private fun workCommands(): LiteralArgumentBuilder<CommandSourceStack> {
+        fun i(ctx: CommandContext<CommandSourceStack>, n: String) = IntegerArgumentType.getInteger(ctx, n)
+        fun box(ctx: CommandContext<CommandSourceStack>, y: Boolean) = if (y)
+            com.grandstrategy.sim.Box.of(i(ctx, "x1"), i(ctx, "y1"), i(ctx, "z1"), i(ctx, "x2"), i(ctx, "y2"), i(ctx, "z2"))
+        else com.grandstrategy.sim.Box.of(i(ctx, "x1"), 0, i(ctx, "z1"), i(ctx, "x2"), 0, i(ctx, "z2"))
+        fun xz(tail: com.mojang.brigadier.Command<CommandSourceStack>) = argument("x1", IntegerArgumentType.integer()).then(argument("z1", IntegerArgumentType.integer())
+            .then(argument("x2", IntegerArgumentType.integer()).then(argument("z2", IntegerArgumentType.integer()).executes(tail))))
+        fun xyz(tail: com.mojang.brigadier.Command<CommandSourceStack>) = argument("x1", IntegerArgumentType.integer()).then(argument("y1", IntegerArgumentType.integer())
+            .then(argument("z1", IntegerArgumentType.integer()).then(argument("x2", IntegerArgumentType.integer()).then(argument("y2", IntegerArgumentType.integer())
+                .then(argument("z2", IntegerArgumentType.integer()).executes(tail))))))
+        fun send(ctx: CommandContext<CommandSourceStack>, m: com.grandstrategy.net.ToServer): Int {
+            rt().workService.handle(ctx.source.playerOrException, com.grandstrategy.net.WorkJson.json.encodeToString(com.grandstrategy.net.ToServer.serializer(), m))
+            return 1
+        }
+        val templates = SuggestionProvider<CommandSourceStack> { _, b ->
+            rt().work.templates.all.forEach { b.suggest(it.index, com.mojang.brigadier.Message { "${it.kind.label} ${it.name}" }) }
+            b.buildFuture()
+        }
+        return literal("work")
+            .then(literal("templates").executes { ctx ->
+                val text = rt().work.templates.all.joinToString("\n") { "${it.index}: ${it.kind.label} ${it.name} ${it.sizeX}×${it.sizeY}×${it.sizeZ}" }
+                reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
+            })
+            .then(literal("build").then(argument("template", IntegerArgumentType.integer(0)).suggests(templates)
+                .then(argument("rotation", IntegerArgumentType.integer(0, 3)).then(xz { ctx ->
+                    send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.BUILD, box(ctx, false), i(ctx, "template"), i(ctx, "rotation"), true))
+                }))))
+            .then(literal("walls").then(xz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.WALLS, box(ctx, false), conscript = true)) }))
+            .then(literal("flatten").then(xz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.FLATTEN, box(ctx, false), conscript = true)) }))
+            .then(literal("demolish").then(xyz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.DEMOLISH, box(ctx, true), conscript = true)) }))
+            .then(literal("select").then(argument("x", IntegerArgumentType.integer()).then(argument("y", IntegerArgumentType.integer()).then(argument("z", IntegerArgumentType.integer()).executes { ctx ->
+                send(ctx, com.grandstrategy.net.ToServer.Select(i(ctx, "x"), i(ctx, "y"), i(ctx, "z")))
+            }))))
+            .then(literal("building").then(argument("id", IntegerArgumentType.integer()).then(argument("action", StringArgumentType.word())
+                .suggests { _, b -> SharedSuggestionProvider.suggest(listOf("demolish", "assign", "forget"), b) }
+                .executes { ctx -> buildingAction(ctx, null) }
+                .then(argument("kind", StringArgumentType.word())
+                    .suggests { _, b -> SharedSuggestionProvider.suggest(com.grandstrategy.sim.BuildingKind.entries.map { it.name.lowercase() }, b) }
+                    .executes { ctx -> buildingAction(ctx, runCatching { com.grandstrategy.sim.BuildingKind.valueOf(StringArgumentType.getString(ctx, "kind").uppercase()) }.getOrNull()) }))))
+            .then(literal("orders").executes { ctx ->
+                val r = rt()
+                val text = r.state.orders.values.joinToString("\n") { o ->
+                    val pct = if (o.total > 0) o.progress * 100 / o.total else 0
+                    "#${o.id} ${r.state.nations[o.nation]?.name} ${o.type.label} ${o.kind?.label ?: ""} $pct% (${o.progress}/${o.total}) 인부 ${r.work.crewSize(o.id)} 현장 ${r.work.workers(o, r.state.nations[o.nation]!!).toInt()}${if (o.pendingPlacement) " 배치대기" else ""} ${o.box}"
+                }.ifEmpty { "진행 중인 작업 없음" }
+                reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
+            })
+            .then(literal("buildings").executes { ctx ->
+                val r = rt()
+                val text = r.state.buildings.values.toList().takeLast(30).joinToString("\n") { b ->
+                    "#${b.id} ${r.state.nations[b.nation ?: -1]?.name ?: "-"} ${b.kind.label} ${if (b.complete) "완공" else "공사중"}${if (b.detected) " 인식" else ""} ${b.box}"
+                }.ifEmpty { "건물 없음" }
+                reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
+            })
+    }
+
+    private fun buildingAction(ctx: CommandContext<CommandSourceStack>, kind: com.grandstrategy.sim.BuildingKind?): Int {
+        val player = ctx.source.playerOrException
+        player.connection.send(net.minecraft.network.protocol.game.ClientboundContainerClosePacket(0))
+        val message = com.grandstrategy.net.ToServer.BuildingAction(IntegerArgumentType.getInteger(ctx, "id"), StringArgumentType.getString(ctx, "action"), kind, true)
+        rt().workService.handle(player, com.grandstrategy.net.WorkJson.json.encodeToString(com.grandstrategy.net.ToServer.serializer(), message))
+        return 1
     }
 
     private fun admin(): LiteralArgumentBuilder<CommandSourceStack> = literal("admin")

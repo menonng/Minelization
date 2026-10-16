@@ -24,6 +24,8 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
     val cutscenes = Cutscenes(this)
     val population = AgentPopulation(sim)
     val agentDisplay = AgentDisplay(this, population)
+    val work = com.grandstrategy.mc.build.WorkManager(this)
+    val workService = com.grandstrategy.mc.build.WorkService(this, work)
     var agentNanos = 0L
         private set
     val observers = HashMap<UUID, Boolean>()
@@ -49,6 +51,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         sim.presence = PresenceProvider { nation, chunk -> presence(nation, chunk) }
         sim.onEvent(::dispatch)
         sim.onCinematic(cutscenes::onCinematic)
+        sim.construction = { nation, kind -> work.autoBuild(nation, kind) }
     }
 
     fun tick() {
@@ -60,6 +63,8 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         population.tick(agentDisplay.hotAgents())
         agentDisplay.tick()
         agentNanos = System.nanoTime() - agentStart
+        work.tick()
+        workService.tick()
         if (!settings.paused && state.seeded && ticks % settings.turnTicks.coerceAtLeast(1) == 0L) runTurn()
         if (ticks % AUTOSAVE_TICKS == 0L) save()
     }

@@ -49,7 +49,9 @@ object Economy {
 
     fun housing(sim: Simulation, nation: Nation): Double {
         val towns = sim.state.settlements.values.filter { it.owner == nation.id }.sumOf { it.population }
-        return nation.claims.size * Balance.HOUSING_PER_CHUNK + nation.totalFacilities() * Balance.HOUSING_PER_FACILITY + towns
+        val houses = sim.state.buildings.values.count { it.nation == nation.id && it.complete && it.kind == BuildingKind.HOUSE }
+        return nation.claims.size * Balance.HOUSING_PER_CHUNK + nation.totalFacilities() * Balance.HOUSING_PER_FACILITY + towns +
+            houses * Balance.config.housingPerHouse
     }
 
     fun science(nation: Nation): Double {
