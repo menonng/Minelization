@@ -1,6 +1,7 @@
 package com.grandstrategy.mc
 
 import com.grandstrategy.GrandStrategy
+import com.grandstrategy.sim.AgentPopulation
 import com.grandstrategy.sim.Chunks
 import com.grandstrategy.sim.EventKind
 import com.grandstrategy.sim.GameEvent
@@ -21,6 +22,10 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
     val sim = Simulation(state, BiomeTerrain(server.overworld()))
     val hooks = WorldHooks(this)
     val cutscenes = Cutscenes(this)
+    val population = AgentPopulation(sim)
+    val agentDisplay = AgentDisplay(this, population)
+    var agentNanos = 0L
+        private set
     val observers = HashMap<UUID, Boolean>()
 
     private var ticks = 0L
@@ -51,6 +56,10 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         hooks.tick(ticks)
         CutsceneGuard.tick(server)
         cutscenes.tick()
+        val agentStart = System.nanoTime()
+        population.tick(agentDisplay.hotAgents())
+        agentDisplay.tick()
+        agentNanos = System.nanoTime() - agentStart
         if (!settings.paused && state.seeded && ticks % settings.turnTicks.coerceAtLeast(1) == 0L) runTurn()
         if (ticks % AUTOSAVE_TICKS == 0L) save()
     }
@@ -61,6 +70,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
             .associate { it.uuid to it.chunkPosition().pack() }
         val start = System.nanoTime()
         sim.turn()
+        population.sync()
         val ms = (System.nanoTime() - start) / 1e6
         lastTurnMs = ms
         measuredTurns++

@@ -69,6 +69,18 @@
 
 형식이 틀리거나 값이 말이 안 되면(음수 비용, 0 이하 노동자 수 등) 거부하고 기존 값을 유지한다. 빠진 키는 기본값을 쓴다. 코드 자체(새 기능, 로직 변경)는 이걸로 바뀌지 않는다. 그건 `./gradlew deploy` 후 서버 재시작이 필요하다.
 
+## 주민 개체 (인구 = 실제로 보이는 주민)
+
+나라의 인구만큼 주민이 존재하고 실제로 걸어 다닌다. 서버에는 엔티티를 만들지 않고 데이터로만 두며, 플레이어 근처 150명만 패킷으로 보여준다. 개체 100,000명에서도 TPS 20을 측정했다 (자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.3).
+
+| 명령 | 설명 |
+| --- | --- |
+| `/gs admin agents` | 개체 수, 표시 수, 초당 패킷, 처리 시간, MSPT/TPS |
+| `/gs admin agents benchmark <수>` · `off` | 인구와 상관없이 개체 수 고정 (부하 시험) / 해제 |
+| `/gs admin agents vanilla <수>` · `clearvanilla` | 비교용 바닐라 주민 소환 / 제거 |
+
+`balance.json`의 `agents` 항목: `perPopulation`(인구 1당 개체), `max`(전체 상한), `spawnPerTurn`, `visibleRadius`, `maxVisiblePerPlayer`.
+
 ## 컷신 (클라이언트 모드)
 
 같은 jar를 클라이언트에도 넣으면 컷신이 나온다. 클라이언트에 모드가 없으면 바닐라 제목·부제목으로 대신 알린다.

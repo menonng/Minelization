@@ -68,6 +68,7 @@ object GrandStrategy : ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register { handler, server ->
             CutsceneGuard.release(server, handler.player)
             runtime?.hooks?.forget(handler.player.uuid)
+            runtime?.agentDisplay?.removePlayer(handler.player.uuid)
         }
 
         ServerLifecycleEvents.SERVER_STOPPING.register { server ->

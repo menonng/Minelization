@@ -217,6 +217,49 @@ object GsCommands {
                 r.cutscenes.play(target, r.cutscenes.spec(kind, nation, other, chunk, target.gameProfile.name()))
                 reply(ctx, Outcome.ok("${target.gameProfile.name()}에게 ${kind.name} 컷신 재생"))
             })))
+        .then(literal("agents").executes { ctx -> reply(ctx, Texts.prefix().append(Texts.plain(agentStatus(), ChatFormatting.WHITE))) }
+            .then(literal("benchmark").then(argument("count", IntegerArgumentType.integer(0, 200_000)).executes { ctx ->
+                val r = rt()
+                val n = IntegerArgumentType.getInteger(ctx, "count")
+                r.population.benchmarkTotal = n
+                var guard = 0
+                while (r.population.agents.count < n * 99 / 100 && guard++ < 1000) r.population.sync()
+                r.population.sync()
+                reply(ctx, Outcome.ok("벤치마크: 개체 ${r.population.agents.count}명 (인구와 무관하게 고정)"))
+            }))
+            .then(literal("off").executes { ctx ->
+                val r = rt()
+                r.population.benchmarkTotal = null
+                r.population.sync()
+                reply(ctx, Outcome.ok("벤치마크 해제: 인구 기준으로 돌아간다 (개체 ${r.population.agents.count}명)"))
+            })
+            .then(literal("vanilla").then(argument("count", IntegerArgumentType.integer(1, 20_000)).executes { ctx ->
+                val player = ctx.source.playerOrException
+                val level = player.level() as net.minecraft.server.level.ServerLevel
+                val n = IntegerArgumentType.getInteger(ctx, "count")
+                val rng = java.util.Random(1)
+                var made = 0
+                repeat(n) {
+                    val x = player.x + rng.nextGaussian() * 40
+                    val z = player.z + rng.nextGaussian() * 40
+                    val bx = kotlin.math.floor(x).toInt()
+                    val bz = kotlin.math.floor(z).toInt()
+                    if (!level.chunkSource.hasChunk(bx shr 4, bz shr 4)) return@repeat
+                    val y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bx, bz)
+                    val v = net.minecraft.world.entity.npc.villager.Villager(net.minecraft.world.entity.EntityTypes.VILLAGER, level)
+                    v.snapTo(x, y.toDouble(), z, rng.nextFloat() * 360f, 0f)
+                    v.entityTags().add("gs_bench")
+                    v.setPersistenceRequired()
+                    if (level.addFreshEntity(v)) made++
+                }
+                reply(ctx, Outcome.ok("바닐라 주민 ${made}명 소환 (비교용, 태그 gs_bench)"))
+            }))
+            .then(literal("clearvanilla").executes { ctx ->
+                val level = rt().server.overworld()
+                val list = level.getEntities(net.minecraft.world.entity.EntityTypes.VILLAGER) { it.entityTags().contains("gs_bench") }
+                list.forEach { it.discard() }
+                reply(ctx, Outcome.ok("비교용 주민 ${list.size}명 제거"))
+            }))
         .then(literal("reload").executes { ctx ->
             val result = BalanceFile.reload()
             var text = Texts.outcome(Outcome(result.ok, result.message)).copy()
@@ -224,6 +267,25 @@ object GsCommands {
             if (result.changed.size > 12) text = text.append(Texts.plain("\n  … 외 ${result.changed.size - 12}개"))
             reply(ctx, text)
         })
+
+    private var lastStatusAt = System.nanoTime()
+    private var lastPackets = 0L
+    private var lastBytes = 0L
+
+    private fun agentStatus(): String {
+        val r = rt()
+        val mspt = r.server.averageTickTimeNanos / 1e6
+        val tps = minOf(20.0, 1000.0 / mspt.coerceAtLeast(0.001))
+        val now = System.nanoTime()
+        val seconds = ((now - lastStatusAt) / 1e9).coerceAtLeast(0.001)
+        val pps = (r.agentDisplay.packetsTotal - lastPackets) / seconds
+        val kbps = (r.agentDisplay.bytesEstimate - lastBytes) / seconds / 1024
+        lastStatusAt = now
+        lastPackets = r.agentDisplay.packetsTotal
+        lastBytes = r.agentDisplay.bytesEstimate
+        return "개체 ${r.population.agents.count}명${r.population.benchmarkTotal?.let { " (벤치마크 $it)" } ?: ""} · 표시 중 ${r.agentDisplay.shownTotal} · 패킷 ${"%.0f".format(pps)}/초 (약 ${"%.1f".format(kbps)} KB/초)\n" +
+            "개체 처리 ${"%.3f".format(r.agentNanos / 1e6)}ms/틱 (표시 ${"%.3f".format(r.agentDisplay.lastNanos / 1e6)}ms) · 서버 MSPT ${"%.2f".format(mspt)} · TPS ${"%.2f".format(tps)}"
+    }
 
     private fun step(ctx: CommandContext<CommandSourceStack>, turns: Int): Int {
         val r = rt()

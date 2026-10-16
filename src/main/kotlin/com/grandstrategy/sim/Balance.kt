@@ -36,6 +36,15 @@ data class AiTuning(
 )
 
 @Serializable
+data class AgentTuning(
+    val perPopulation: Double = 1.0,
+    val max: Int = 30000,
+    val spawnPerTurn: Int = 800,
+    val visibleRadius: Int = 48,
+    val maxVisiblePerPlayer: Int = 150
+)
+
+@Serializable
 data class BalanceConfig(
     val startPopulation: Double = 30.0,
     val startMilitary: Double = 10.0,
@@ -88,7 +97,8 @@ data class BalanceConfig(
         Facility.WALLS to mapOf(Resource.STONE to 40.0, Resource.IRON to 5.0, Resource.GOLD to 5.0)
     ),
     val terrain: Map<Terrain, Yields> = Terrain.entries.associateWith { Yields(it.food, it.wood, it.stone, it.iron, it.gold) },
-    val ai: AiTuning = AiTuning()
+    val ai: AiTuning = AiTuning(),
+    val agents: AgentTuning = AgentTuning()
 ) {
     fun problems(): List<String> = buildList {
         if (workersPerChunk <= 0) add("workersPerChunk must be > 0")
@@ -96,6 +106,8 @@ data class BalanceConfig(
         if (maxEvents < 10) add("maxEvents must be >= 10")
         if (tradeRange < 0) add("tradeRange must be >= 0")
         if (recruitCapRatio < 0) add("recruitCapRatio must be >= 0")
+        if (agents.perPopulation < 0 || agents.max < 0 || agents.spawnPerTurn < 0) add("agents values must be >= 0")
+        if (agents.visibleRadius !in 8..128 || agents.maxVisiblePerPlayer !in 0..1000) add("agents.visibleRadius 8..128, agents.maxVisiblePerPlayer 0..1000")
         if (ai.economicActionsPerTurn < 0 || ai.strategicActionsPerTurn < 0) add("ai action counts must be >= 0")
         val numbers = listOf(startPopulation, startMilitary, housingPerChunk, foodPerPop, growthRate, starvationLoss, storageBase)
         if (numbers.any { it.isNaN() || it < 0 }) add("start and economy values must be non-negative numbers")
