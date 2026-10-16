@@ -29,6 +29,14 @@
 
 개발 서버: `./gradlew runServer` (실행 폴더 `run/`).
 
+### 테스트 서버에 설치
+
+```bash
+./gradlew deploy -PserverDir=D:/my-server
+```
+
+빌드한 jar를 `<서버>/mods`에 넣고, 이전 빌드(`grandstrategy-*.jar`)는 지운다. 다른 모드는 건드리지 않는다. 매번 경로를 쓰기 싫으면 저장소 루트에 `local.properties`를 만들고 `serverDir=D:/my-server`를 적는다 (git에 올라가지 않는다). 환경 변수 `MINELIZATION_SERVER`도 된다. 서버가 켜져 있으면 jar가 잠겨 실패할 수 있으니 서버를 끈 뒤 실행한다.
+
 ## 시작하기
 
 1. 월드를 처음 열면 스폰 주변에서 바닐라 마을을 몇 곳 찾고, 그다음 AI 나라 6개를 세운다 (약 10초).

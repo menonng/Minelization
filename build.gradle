@@ -65,3 +65,29 @@ tasks.register("collect", Copy) {
     from tasks.named("jar")
     into layout.projectDirectory.dir("dist")
 }
+
+def localProps = new Properties()
+def localFile = file("local.properties")
+if (localFile.exists()) localFile.withReader("UTF-8") { localProps.load(it) }
+def serverDir = project.findProperty("serverDir") ?: localProps.getProperty("serverDir") ?: System.getenv("MINELIZATION_SERVER")
+
+tasks.register("deploy") {
+    group = "distribution"
+    description = "Builds the mod jar and installs it into <serverDir>/mods, replacing older builds."
+    dependsOn tasks.named("jar")
+    doLast {
+        if (serverDir == null) {
+            throw new GradleException("Set the server folder: -PserverDir=<path>, serverDir=<path> in local.properties, or MINELIZATION_SERVER")
+        }
+        def mods = file("${serverDir}/mods")
+        if (!file(serverDir).isDirectory()) throw new GradleException("Server folder not found: ${serverDir}")
+        mods.mkdirs()
+        def built = tasks.jar.archiveFile.get().asFile
+        fileTree(mods) { include "${project.archives_base_name}-*.jar" }.each { it.delete() }
+        copy {
+            from built
+            into mods
+        }
+        println "Installed ${built.name} -> ${mods}"
+    }
+}
