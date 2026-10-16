@@ -52,6 +52,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         sim.onEvent(::dispatch)
         sim.onCinematic(cutscenes::onCinematic)
         sim.construction = { nation, kind -> work.autoBuild(nation, kind) }
+        population.planner = com.grandstrategy.mc.agents.VillagePlanner(this) { agentDisplay.isShown(it) }
     }
 
     fun tick() {
@@ -60,6 +61,8 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         CutsceneGuard.tick(server)
         cutscenes.tick()
         val agentStart = System.nanoTime()
+        population.dayTime = server.overworld().overworldClockTime
+        population.raining = server.overworld().isRaining
         population.tick(agentDisplay.hotAgents())
         agentDisplay.tick()
         agentNanos = System.nanoTime() - agentStart

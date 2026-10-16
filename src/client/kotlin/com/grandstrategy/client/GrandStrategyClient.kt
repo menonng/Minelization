@@ -10,6 +10,7 @@ import com.grandstrategy.net.ServerMessagePayload
 import com.grandstrategy.net.ToClient
 import com.grandstrategy.net.WorkJson
 import net.fabricmc.fabric.api.event.client.player.ClientPreAttackCallback
+import net.fabricmc.fabric.api.event.client.player.ClientHotbarScrollEvents
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
@@ -35,5 +36,7 @@ object GrandStrategyClient : ClientModInitializer {
             runCatching { WorkJson.json.decodeFromString(ToClient.serializer(), payload.json) }.getOrNull()?.let { WorkMode.onMessage(it) }
         }
         ClientPreAttackCallback.EVENT.register { _, _, _ -> WorkMode.swallowAttack() }
+        ClientTickEvents.START_CLIENT_TICK.register { mc -> WorkMode.blockVanillaInput(mc) }
+        ClientHotbarScrollEvents.ALLOW.register { _, _, _, _, _ -> !WorkMode.active }
     }
 }

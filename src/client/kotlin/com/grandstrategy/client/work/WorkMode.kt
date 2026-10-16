@@ -145,8 +145,19 @@ object WorkMode {
         send(ToServer.Mode(on))
     }
 
+    fun blockVanillaInput(mc: Minecraft) {
+        if (!active) return
+        for (key in mc.options.keyHotbarSlots) while (key.consumeClick()) {}
+        while (mc.options.keyPickItem.consumeClick()) {}
+        while (mc.options.keySwapOffhand.consumeClick()) {}
+    }
+
     private fun confirmSelection() {
         val box = selection ?: return
+        problem(box)?.let {
+            toast(it, false)
+            return
+        }
         val area = Box(box.minX, box.minY, box.minZ, box.maxX, if (tool == WorkTool.DEMOLISH) box.maxY + 12 else box.maxY, box.maxZ)
         send(ToServer.Order(tool, area, templateIndex, rotation, conscript))
     }

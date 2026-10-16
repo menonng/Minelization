@@ -22,6 +22,10 @@ import net.minecraft.server.level.ServerLevel
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.tags.BiomeTags
 import net.minecraft.world.entity.EntityTypes
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.item.Items
+import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket
 import net.minecraft.world.entity.PositionPath
 import net.minecraft.world.entity.npc.villager.Villager
 import net.minecraft.world.entity.npc.villager.VillagerData
@@ -41,6 +45,11 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
     private var shownX = FloatArray(0)
     private var shownZ = FloatArray(0)
     private var shownY = FloatArray(0)
+    private var shownYaw = FloatArray(0)
+    private var shownPitch = FloatArray(0)
+    val walker = com.grandstrategy.mc.agents.Walker(population) { rt.server.overworld() }
+    var teleports = 0L
+        private set
     private var skin = ByteArray(0)
     private val viewers = HashMap<UUID, IntOpenHashSet>()
     private val grid = Long2ObjectOpenHashMap<IntArrayList>()
@@ -65,6 +74,8 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
 
     fun hotAgents(): Iterable<Int> = hot
 
+    fun isShown(i: Int): Boolean = hot.contains(i)
+
     private fun ensure() {
         val n = agents.capacity
         if (netId.size >= n) return
@@ -72,6 +83,8 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         shownX = shownX.copyOf(n)
         shownZ = shownZ.copyOf(n)
         shownY = shownY.copyOf(n)
+        shownYaw = shownYaw.copyOf(n)
+        shownPitch = shownPitch.copyOf(n)
         skin = skin.copyOf(n).also { for (k in skin.size until n) it[k] = -1 }
     }
 
@@ -82,6 +95,7 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         packetsLastTick = 0
         if (ticks % GRID_INTERVAL == 0L || grid.isEmpty()) rebuildGrid()
         if (ticks % UPDATE_INTERVAL == 0L) update()
+        walker.tick(hot, 0.05f)
         packetsTotal += packetsLastTick
         lastNanos = System.nanoTime() - start
     }
@@ -101,24 +115,20 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         val chunkRadius = (tuning.visibleRadius shr 4) + 1
         val players = rt.server.playerList.players
         val online = HashSet<UUID>()
-        hot.clear()
+        val wants = HashMap<UUID, IntOpenHashSet>()
+        val union = IntOpenHashSet()
         for (player in players) {
             online += player.uuid
-            val seen = viewers.getOrPut(player.uuid) { IntOpenHashSet() }
-            if (player.level() != level) {
-                hide(player, seen, IntOpenHashSet(seen))
-                continue
-            }
+            if (player.level() != level) continue
             val px = player.x
             val pz = player.z
             val center = player.chunkPosition()
-            val candidates = IntArrayList()
             val dists = ArrayList<Pair<Int, Double>>()
             for (dx in -chunkRadius..chunkRadius) for (dz in -chunkRadius..chunkRadius) {
                 val list = grid.get(Chunks.pack(center.x + dx, center.z + dz)) ?: continue
                 for (k in 0 until list.size) {
                     val i = list.getInt(k)
-                    if (!agents.alive[i]) continue
+                    if (!agents.alive[i] || agents.sleeping(i)) continue
                     val ddx = agents.x[i] - px
                     val ddz = agents.z[i] - pz
                     val d = ddx * ddx + ddz * ddz
@@ -126,8 +136,30 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
                 }
             }
             if (dists.size > tuning.maxVisiblePerPlayer) dists.sortBy { it.second }
-            for (k in 0 until minOf(dists.size, tuning.maxVisiblePerPlayer)) candidates.add(dists[k].first)
-            val want = IntOpenHashSet(candidates)
+            val want = IntOpenHashSet()
+            for (k in 0 until minOf(dists.size, tuning.maxVisiblePerPlayer)) want.add(dists[k].first)
+            wants[player.uuid] = want
+            union.addAll(want)
+        }
+        val failed = IntOpenHashSet()
+        var snaps = SNAPS_PER_UPDATE
+        val iterUnion = union.iterator()
+        while (iterUnion.hasNext()) {
+            val i = iterUnion.nextInt()
+            if (hot.contains(i) || agents.guided[i]) continue
+            if (snaps <= 0 || !walker.take(i)) failed.add(i)
+            snaps--
+        }
+        union.removeAll(failed)
+        val iterOld = hot.iterator()
+        while (iterOld.hasNext()) {
+            val i = iterOld.nextInt()
+            if (!union.contains(i)) walker.release(i)
+        }
+        for (player in players) {
+            val seen = viewers.getOrPut(player.uuid) { IntOpenHashSet() }
+            val want = wants[player.uuid] ?: IntOpenHashSet()
+            want.removeAll(failed)
             val gone = IntOpenHashSet()
             val iter = seen.iterator()
             while (iter.hasNext()) {
@@ -138,13 +170,20 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
             val iterWant = want.iterator()
             while (iterWant.hasNext()) {
                 val i = iterWant.nextInt()
-                hot.add(i)
                 if (seen.add(i)) show(player, i)
             }
         }
+        hot.clear()
+        hot.addAll(union)
         viewers.keys.retainAll(online)
         broadcastMoves()
         shownTotal = viewers.values.sumOf { it.size }
+    }
+
+    private fun pose(i: Int): Pair<Float, Float> {
+        val working = agents.state[i] == com.grandstrategy.sim.AgentState.WORK
+        val yaw = walker.yaw[i] ?: shownYaw[i]
+        return yaw to (if (working) 28f else 0f)
     }
 
     private fun broadcastMoves() {
@@ -154,15 +193,27 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
             if (netId[i] == 0) continue
             val x = agents.x[i]
             val z = agents.z[i]
+            val y = if (agents.y[i].isNaN()) shownY[i] else agents.y[i]
             val dx = x - shownX[i]
             val dz = z - shownZ[i]
-            if (dx * dx + dz * dz < 0.0004f) continue
-            val y = ground(x, z) ?: shownY[i]
-            val yaw = (Math.toDegrees(atan2(dz.toDouble(), dx.toDouble())) - 90.0).toFloat()
+            val dy = y - shownY[i]
+            val (yaw, pitch) = pose(i)
+            val moved = dx * dx + dz * dz + dy * dy >= 0.0004f
+            val turned = kotlin.math.abs(yaw - shownYaw[i]) > 2f || kotlin.math.abs(pitch - shownPitch[i]) > 2f
+            if (!moved && !turned) continue
+            val jump = kotlin.math.sqrt(dx * dx + dz * dz + dy * dy)
+            if (jump > TELEPORT_DISTANCE) {
+                teleports++
+                if (teleports <= 20) com.grandstrategy.GrandStrategy.LOGGER.warn(
+                    "Agent {} jumped {} blocks (state {}, guided {})", agents.uid[i], "%.2f".format(jump), agents.state[i], agents.guided[i]
+                )
+            }
             shownX[i] = x
             shownZ[i] = z
             shownY[i] = y
-            val sync = ClientboundEntityPositionSyncPacket(netId[i], PositionPath.of(Vec3(x.toDouble(), y.toDouble(), z.toDouble())), yaw, 0f, true)
+            shownYaw[i] = yaw
+            shownPitch[i] = pitch
+            val sync = ClientboundEntityPositionSyncPacket(netId[i], PositionPath.of(Vec3(x.toDouble(), y.toDouble(), z.toDouble())), yaw, pitch, true)
             val head = headPacket(netId[i], yaw)
             for ((uuid, seen) in viewers) {
                 if (!seen.contains(i)) continue
@@ -179,18 +230,35 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         if (netId[i] == 0) netId[i] = level.nextEntityId
         val x = agents.x[i]
         val z = agents.z[i]
-        val y = ground(x, z) ?: return
+        val y = if (agents.y[i].isNaN()) (ground(x, z) ?: return) else agents.y[i]
         shownX[i] = x
         shownZ[i] = z
         shownY[i] = y
+        val (yaw, pitch) = pose(i)
+        shownYaw[i] = yaw
+        shownPitch[i] = pitch
         if (skin[i] < 0) skin[i] = skinFor(i, x, z).toByte()
         val uuid = UUID(0x6D696E656CL, agents.uid[i].toLong())
         player.connection.send(
-            ClientboundAddEntityPacket(netId[i], uuid, x.toDouble(), y.toDouble(), z.toDouble(), 0f, 0f, EntityTypes.VILLAGER, 0, Vec3.ZERO, 0.0)
+            ClientboundAddEntityPacket(netId[i], uuid, x.toDouble(), y.toDouble(), z.toDouble(), pitch, yaw, EntityTypes.VILLAGER, 0, Vec3.ZERO, yaw.toDouble())
         )
         player.connection.send(ClientboundSetEntityDataPacket(netId[i], template(skin[i].toInt())))
-        packetsLastTick += 2
-        bytesEstimate += 80
+        tool(i)?.let { item ->
+            player.connection.send(ClientboundSetEquipmentPacket(netId[i], listOf(com.mojang.datafixers.util.Pair(EquipmentSlot.MAINHAND, ItemStack(item)))))
+        }
+        packetsLastTick += 3
+        bytesEstimate += 100
+    }
+
+    private fun tool(i: Int): net.minecraft.world.item.Item? = when (Job.entries[agents.job[i].toInt()]) {
+        Job.FARMER -> Items.IRON_HOE
+        Job.LUMBERJACK -> Items.IRON_AXE
+        Job.MINER -> Items.IRON_PICKAXE
+        Job.BUILDER -> Items.IRON_SHOVEL
+        Job.MERCHANT -> Items.EMERALD
+        Job.SCHOLAR -> Items.BOOK
+        Job.SOLDIER -> Items.IRON_SWORD
+        Job.CHILD -> null
     }
 
     private fun hide(player: ServerPlayer, seen: IntOpenHashSet, gone: IntOpenHashSet) {
@@ -218,6 +286,7 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         netId[i] = 0
         skin[i] = -1
         hot.remove(i)
+        walker.forget(i)
     }
 
     fun removePlayer(uuid: UUID) {
@@ -288,5 +357,7 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
     private companion object {
         const val GRID_INTERVAL = 10L
         const val UPDATE_INTERVAL = 2L
+        const val TELEPORT_DISTANCE = 1.2f
+        const val SNAPS_PER_UPDATE = 25
     }
 }

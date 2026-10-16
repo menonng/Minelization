@@ -319,6 +319,17 @@ object GsCommands {
                 }
                 reply(ctx, Outcome.ok("바닐라 주민 ${made}명 소환 (비교용, 태그 gs_bench)"))
             }))
+            .then(literal("probe").then(argument("x", IntegerArgumentType.integer()).then(argument("z", IntegerArgumentType.integer()).executes { ctx ->
+                val r = rt()
+                val level = r.server.overworld()
+                val x = IntegerArgumentType.getInteger(ctx, "x")
+                val z = IntegerArgumentType.getInteger(ctx, "z")
+                val w = r.agentDisplay.walker
+                val est = w.groundEstimate(level, x, z)
+                val snap = w.snap(level, x + 0.5f, Float.NaN, z + 0.5f)
+                val top = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z)
+                reply(ctx, Outcome.ok("top=$top ground=$est snap=$snap"))
+            })))
             .then(literal("clearvanilla").executes { ctx ->
                 val level = rt().server.overworld()
                 val list = level.getEntities(net.minecraft.world.entity.EntityTypes.VILLAGER) { it.entityTags().contains("gs_bench") }
@@ -349,7 +360,8 @@ object GsCommands {
         lastPackets = r.agentDisplay.packetsTotal
         lastBytes = r.agentDisplay.bytesEstimate
         return "개체 ${r.population.agents.count}명${r.population.benchmarkTotal?.let { " (벤치마크 $it)" } ?: ""} · 표시 중 ${r.agentDisplay.shownTotal} · 패킷 ${"%.0f".format(pps)}/초 (약 ${"%.1f".format(kbps)} KB/초)\n" +
-            "개체 처리 ${"%.3f".format(r.agentNanos / 1e6)}ms/틱 (표시 ${"%.3f".format(r.agentDisplay.lastNanos / 1e6)}ms) · 서버 MSPT ${"%.2f".format(mspt)} · TPS ${"%.2f".format(tps)}"
+            "개체 처리 ${"%.3f".format(r.agentNanos / 1e6)}ms/틱 (표시 ${"%.3f".format(r.agentDisplay.lastNanos / 1e6)}ms) · 서버 MSPT ${"%.2f".format(mspt)} · TPS ${"%.2f".format(tps)}\n" +
+            "순간이동 ${r.agentDisplay.teleports}건 · 경로 탐색 ${r.agentDisplay.walker.searches}회 (평균 ${"%.3f".format(r.agentDisplay.walker.searchNanos / 1e6 / r.agentDisplay.walker.searches.coerceAtLeast(1))}ms) · 시간대 ${r.population.phase()}"
     }
 
     private fun step(ctx: CommandContext<CommandSourceStack>, turns: Int): Int {

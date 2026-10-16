@@ -96,4 +96,32 @@ class AgentsTest {
         println("agents=${pop.agents.count} avg tick ${"%.4f".format(perTick)} ms, sync ${"%.3f".format(perSync)} ms (every 200 ticks)")
         assertTrue(perTick < 1.0, "agent tick must stay far below the 50 ms tick budget")
     }
+
+    @Test
+    fun dailyRoutineSleepsIndoorsAndWorksByDay() {
+        val sim = world(1)
+        val nation = sim.state.nations[1]!!
+        nation.population = 60.0
+        val pop = AgentPopulation(sim)
+        pop.planner = object : AgentPlanner {
+            override fun home(nation: Int, rng: kotlin.random.Random) = Home(8f, 8f, true)
+            override fun meeting(nation: Int) = 8f to 8f
+        }
+        pop.sync()
+        pop.dayTime = 15000
+        repeat(20 * 90) { pop.tick(emptyList()) }
+        var sleeping = 0
+        pop.agents.forEachAlive { if (pop.agents.sleeping(it)) sleeping++ }
+        assertTrue(sleeping > pop.agents.count * 0.9, "at night nearly everyone should sleep indoors, sleeping=$sleeping/${pop.agents.count}")
+        pop.dayTime = 3000
+        repeat(20 * 60) { pop.tick(emptyList()) }
+        var awake = 0
+        var working = 0
+        pop.agents.forEachAlive {
+            if (!pop.agents.sleeping(it)) awake++
+            if (pop.agents.state[it] == AgentState.WORK || pop.agents.state[it] == AgentState.TO_WORK) working++
+        }
+        assertEquals(pop.agents.count, awake, "everyone wakes up by day")
+        assertTrue(working > pop.agents.count / 3, "many should be working, working=$working")
+    }
 }
