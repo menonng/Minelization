@@ -2,7 +2,7 @@
 
 마인크래프트 기본 월드에서 여러 나라가 스스로 자라고, 교역하고, 연구하고, 전쟁한다. 플레이어는 나라 하나를 맡아 운영하거나 지켜본다. 바닐라 마을은 나라가 아닌 **자유 마을**로 남는다.
 
-설계와 판단 근거는 [docs/DESIGN.md](docs/DESIGN.md).
+설계와 판단 근거는 [docs/DESIGN.md](docs/DESIGN.md), 앞으로의 계획은 [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## 요구사항
 
