@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "grandstrategy",
+  "version": "${version}",
+  "name": "Grand Strategy",
+  "description": "Nations grow, trade, research and wage war across a vanilla world. Vanilla villages stay independent settlements.",
+  "authors": [],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      {
+        "adapter": "kotlin",
+        "value": "com.grandstrategy.GrandStrategy"
+      }
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=${fabric_kotlin_version}",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=25"
+  }
+}
