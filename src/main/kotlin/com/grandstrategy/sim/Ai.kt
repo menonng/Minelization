@@ -4,8 +4,6 @@ import kotlin.math.max
 import kotlin.math.min
 
 object Ai {
-    const val ACTIONS_PER_TURN = 1
-    const val THRESHOLD = 0.25
 
     class Assessment(
         val net: Map<Resource, Double>,
@@ -29,14 +27,12 @@ object Ai {
             nation.posture = posture(nation, view)
             freeChoices(sim, nation, view)
             val ranked = candidates(sim, nation, view).sortedByDescending { it.utility }
-            execute(sim, nation, ranked.filter { isStrategic(it.action) }, STRATEGIC_PER_TURN, STRATEGIC_THRESHOLD)
-            execute(sim, nation, ranked.filter { it.action is Action.Claim }, 1, THRESHOLD)
-            execute(sim, nation, ranked.filter { !isStrategic(it.action) && it.action !is Action.Claim }, ACTIONS_PER_TURN, THRESHOLD)
+            val tuning = Balance.ai
+            execute(sim, nation, ranked.filter { isStrategic(it.action) }, tuning.strategicActionsPerTurn, tuning.strategicThreshold)
+            execute(sim, nation, ranked.filter { it.action is Action.Claim }, 1, tuning.economicThreshold)
+            execute(sim, nation, ranked.filter { !isStrategic(it.action) && it.action !is Action.Claim }, tuning.economicActionsPerTurn, tuning.economicThreshold)
         }
     }
-
-    const val STRATEGIC_PER_TURN = 1
-    const val STRATEGIC_THRESHOLD = 0.45
 
     private fun isStrategic(action: Action): Boolean = action is Action.ProposeTreaty || action is Action.DeclareWar ||
         action is Action.ProposePeace || action is Action.Envoy || action is Action.Conquer
@@ -85,7 +81,7 @@ object Ai {
                 if (!seen.add(n)) continue
                 if (Actions.claimError(sim, nation, n) != null) continue
                 val t = sim.terrain(n)
-                var value = Resource.entries.sumOf { t.yield(it) * (1.0 + 2.0 * (pressure[it] ?: 0.0)) }
+                var value = Resource.entries.sumOf { Balance.yield(t, it) * (1.0 + 2.0 * (pressure[it] ?: 0.0)) }
                 value += Chunks.neighbors(n).count { sim.state.owners[it] == nation.id } * 0.4
                 value -= Chunks.distance(n, nation.capital) * 0.05
                 if (value > bestValue) {
@@ -128,7 +124,7 @@ object Ai {
         }
         val policyKey = WorldState.pairKey(nation.id, 0)
         val lastChange = sim.aiMemory[policyKey] ?: -100L
-        if (sim.state.turn - lastChange < 10) return
+        if (sim.state.turn - lastChange < Balance.ai.policyCooldownTurns) return
         val policy = when (nation.posture) {
             Posture.WAR, Posture.ARM -> Policy.MILITARY
             Posture.CONSOLIDATE -> Policy.BALANCED
@@ -202,10 +198,10 @@ object Ai {
             view.rival?.let { rival ->
                 val opinion = Diplomacy.opinion(sim, nation.id, rival.id)
                 val fed = (view.pressure[Resource.FOOD] ?: 0.0) < 0.5
-                val hated = opinion < -25
-                val greedy = p.aggression > 0.55 && view.rivalRatio > 1.3
+                val hated = opinion < Balance.ai.warHatredOpinion
+                val greedy = p.aggression > 0.55 && view.rivalRatio > Balance.ai.warPowerRatioGreedy
                 val lastWar = sim.aiMemory[WorldState.pairKey(nation.id, -1)] ?: -100L
-                if ((hated || greedy) && fed && view.rivalRatio > (if (hated) 1.0 else 1.3) && state.turn - lastWar > 20) {
+                if ((hated || greedy) && fed && view.rivalRatio > (if (hated) Balance.ai.warPowerRatioHated else Balance.ai.warPowerRatioGreedy) && state.turn - lastWar > Balance.ai.warCooldownTurns) {
                     val u = p.aggression * 0.8 + (view.rivalRatio - 1.2) * 0.3 - opinion / 100.0 - p.diplomacy * 0.3
                     out += Candidate(Action.DeclareWar(rival.id), u, "전력비 ${"%.1f".format(view.rivalRatio)}, 호감도 ${opinion.toInt()}")
                 }
@@ -221,7 +217,7 @@ object Ai {
             if (other.id == nation.id || state.warBetween(nation.id, other.id) != null) continue
             val key = WorldState.pairKey(nation.id, other.id) xor 0x5bd1e995L
             val last = sim.aiMemory[key] ?: -100L
-            if (state.turn - last < 15) continue
+            if (state.turn - last < Balance.ai.proposalCooldownTurns) continue
             val r = state.relation(nation.id, other.id)
             val opinion = r.opinion
             val threat = view.threats[other.id] ?: 0.0

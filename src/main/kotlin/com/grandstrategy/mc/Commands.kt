@@ -201,6 +201,13 @@ object GsCommands {
                 ChatFormatting.WHITE)))
         })
         .then(literal("save").executes { ctx -> rt().save(); reply(ctx, Outcome.ok("저장했다.")) })
+        .then(literal("reload").executes { ctx ->
+            val result = BalanceFile.reload()
+            var text = Texts.outcome(Outcome(result.ok, result.message)).copy()
+            for (line in result.changed.take(12)) text = text.append(Texts.plain("\n  $line"))
+            if (result.changed.size > 12) text = text.append(Texts.plain("\n  … 외 ${result.changed.size - 12}개"))
+            reply(ctx, text)
+        })
 
     private fun step(ctx: CommandContext<CommandSourceStack>, turns: Int): Int {
         val r = rt()

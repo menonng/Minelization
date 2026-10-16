@@ -14,7 +14,7 @@ object Economy {
         val base = HashMap<Resource, Double>()
         for (chunk in nation.claims) {
             val terrain = sim.terrain(chunk)
-            for (r in Resource.entries) base.merge(r, terrain.yield(r), Double::plus)
+            for (r in Resource.entries) base.merge(r, Balance.yield(terrain, r), Double::plus)
         }
         val labor = min(1.0, nation.population / max(1.0, nation.claims.size * Balance.WORKERS_PER_CHUNK))
         val industry = 1.0 + 0.05 * nation.level(TechBranch.INDUSTRY)

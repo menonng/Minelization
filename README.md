@@ -57,7 +57,17 @@
 | `/gs claim` · `build <시설>` · `recruit <수>` · `research <분야>` · `policy <정책>` · `deposit` | 내정 |
 | `/gs envoy` · `conquer` | 가장 가까운 자유 마을에 사절 / 정복 |
 | `/gs treaty <종류> <국가>` · `untreaty <종류> <국가>` · `war <국가>` · `peace <국가>` · `accept <id>` · `decline <id>` | 외교 |
-| `/gs admin speed <틱>` · `pause` · `resume` · `step [턴]` · `seed <수>` · `perf` · `save` | 관리 (OP) |
+| `/gs admin speed <틱>` · `pause` · `resume` · `step [턴]` · `seed <수>` · `perf` · `save` · `reload` | 관리 (OP) |
+
+## 밸런스 실시간 조정
+
+수치는 전부 `config/grandstrategy/balance.json`에 있다 (첫 실행 때 기본값으로 생성). 인구 증가율, 자원 소비, 지형별 생산량, 시설·확장·징병 비용, 연구 비용, 교역 범위, AI 임계값과 선전포고 조건 등.
+
+1. 서버가 켜진 채로 파일을 고친다.
+2. 게임에서 `/gs admin reload`.
+3. 바뀐 값 목록이 채팅에 나오고 다음 턴부터 바로 적용된다.
+
+형식이 틀리거나 값이 말이 안 되면(음수 비용, 0 이하 노동자 수 등) 거부하고 기존 값을 유지한다. 빠진 키는 기본값을 쓴다. 코드 자체(새 기능, 로직 변경)는 이걸로 바뀌지 않는다. 그건 `./gradlew deploy` 후 서버 재시작이 필요하다.
 
 ## 저장
 

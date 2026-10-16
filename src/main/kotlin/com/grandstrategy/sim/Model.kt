@@ -23,13 +23,7 @@ enum class Terrain(val label: String, val food: Double, val wood: Double, val st
 
     val claimable: Boolean get() = this != WATER
 
-    fun yield(resource: Resource): Double = when (resource) {
-        Resource.FOOD -> food
-        Resource.WOOD -> wood
-        Resource.STONE -> stone
-        Resource.IRON -> iron
-        Resource.GOLD -> gold
-    }
+    fun yield(resource: Resource): Double = Balance.yield(this, resource)
 }
 
 enum class Facility(val label: String, val boosts: Resource?) {

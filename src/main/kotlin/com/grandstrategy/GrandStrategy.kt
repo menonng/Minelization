@@ -1,5 +1,6 @@
 package com.grandstrategy
 
+import com.grandstrategy.mc.BalanceFile
 import com.grandstrategy.mc.GsCommands
 import com.grandstrategy.mc.Runtime
 import com.grandstrategy.mc.Storage
@@ -20,6 +21,7 @@ object GrandStrategy : ModInitializer {
         private set
 
     override fun onInitialize() {
+        BalanceFile.loadAtStartup()
         CommandRegistrationCallback.EVENT.register { dispatcher, _, _ -> GsCommands.register(dispatcher) }
 
         ServerLifecycleEvents.SERVER_STARTED.register { server ->
