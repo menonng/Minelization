@@ -28,6 +28,8 @@ import net.minecraft.commands.Commands
 import net.minecraft.commands.Commands.argument
 import net.minecraft.commands.Commands.literal
 import net.minecraft.commands.SharedSuggestionProvider
+import net.minecraft.commands.arguments.EntityArgument
+import com.grandstrategy.net.CutsceneKind
 import net.minecraft.network.chat.Component
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.tags.ItemTags
@@ -201,6 +203,20 @@ object GsCommands {
                 ChatFormatting.WHITE)))
         })
         .then(literal("save").executes { ctx -> rt().save(); reply(ctx, Outcome.ok("저장했다.")) })
+        .then(literal("cutscene").then(argument("kind", StringArgumentType.word())
+            .suggests { _, b -> SharedSuggestionProvider.suggest(CutsceneKind.entries.map { it.name.lowercase() }, b) }
+            .then(argument("player", EntityArgument.player()).executes { ctx ->
+                val r = rt()
+                val target = EntityArgument.getPlayer(ctx, "player")
+                val kind = runCatching { CutsceneKind.valueOf(StringArgumentType.getString(ctx, "kind").uppercase()) }.getOrNull()
+                    ?: return@executes reply(ctx, Outcome.fail("종류: founding, capital_fall, destruction"))
+                val nation = r.citizenNation(target) ?: r.state.alive().firstOrNull()
+                    ?: return@executes reply(ctx, Outcome.fail("나라가 없다."))
+                val other = r.state.alive().firstOrNull { it.id != nation.id }
+                val chunk = if (kind == CutsceneKind.FOUNDING) target.chunkPosition().pack() else nation.capital
+                r.cutscenes.play(target, r.cutscenes.spec(kind, nation, other, chunk, target.gameProfile.name()))
+                reply(ctx, Outcome.ok("${target.gameProfile.name()}에게 ${kind.name} 컷신 재생"))
+            })))
         .then(literal("reload").executes { ctx ->
             val result = BalanceFile.reload()
             var text = Texts.outcome(Outcome(result.ok, result.message)).copy()

@@ -15,6 +15,24 @@ repositories {
     mavenCentral()
 }
 
+loom {
+    splitEnvironmentSourceSets()
+    mods {
+        grandstrategy {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+    runs {
+        client {
+            runDir "run/client"
+            programArgs "--quickPlayMultiplayer", "localhost:25565", "--username", "Tester"
+            vmArg "-XX:ErrorFile=hs_err_%p.log"
+            vmArg "-Dgrandstrategy.capture=" + (project.findProperty("capture") ?: "false")
+        }
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"

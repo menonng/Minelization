@@ -20,6 +20,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
     val state: WorldState = save?.state ?: WorldState(seed = server.overworld().seed)
     val sim = Simulation(state, BiomeTerrain(server.overworld()))
     val hooks = WorldHooks(this)
+    val cutscenes = Cutscenes(this)
     val observers = HashMap<UUID, Boolean>()
 
     private var ticks = 0L
@@ -42,11 +43,14 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         sim.minNations = settings.minNations
         sim.presence = PresenceProvider { nation, chunk -> presence(nation, chunk) }
         sim.onEvent(::dispatch)
+        sim.onCinematic(cutscenes::onCinematic)
     }
 
     fun tick() {
         ticks++
         hooks.tick(ticks)
+        CutsceneGuard.tick(server)
+        cutscenes.tick()
         if (!settings.paused && state.seeded && ticks % settings.turnTicks.coerceAtLeast(1) == 0L) runTurn()
         if (ticks % AUTOSAVE_TICKS == 0L) save()
     }

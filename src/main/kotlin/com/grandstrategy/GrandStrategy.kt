@@ -1,6 +1,12 @@
 package com.grandstrategy
 
 import com.grandstrategy.mc.BalanceFile
+import com.grandstrategy.mc.CutsceneGuard
+import com.grandstrategy.net.CutsceneDonePayload
+import com.grandstrategy.net.PlayCutscenePayload
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
 import com.grandstrategy.mc.GsCommands
 import com.grandstrategy.mc.Runtime
 import com.grandstrategy.mc.Storage
@@ -22,6 +28,13 @@ object GrandStrategy : ModInitializer {
 
     override fun onInitialize() {
         BalanceFile.loadAtStartup()
+        PayloadTypeRegistry.clientboundPlay().register(PlayCutscenePayload.TYPE, PlayCutscenePayload.CODEC)
+        PayloadTypeRegistry.serverboundPlay().register(CutsceneDonePayload.TYPE, CutsceneDonePayload.CODEC)
+        ServerPlayNetworking.registerGlobalReceiver(CutsceneDonePayload.TYPE) { payload, context ->
+            val player = context.player()
+            CutsceneGuard.finish(player.level().server, player, payload.id)
+        }
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register { entity, _, _ -> !CutsceneGuard.isGuarded(entity.uuid) }
         CommandRegistrationCallback.EVENT.register { dispatcher, _, _ -> GsCommands.register(dispatcher) }
 
         ServerLifecycleEvents.SERVER_STARTED.register { server ->
@@ -39,8 +52,9 @@ object GrandStrategy : ModInitializer {
 
         ServerChunkEvents.CHUNK_LOAD.register { level, chunk, _ -> runtime?.hooks?.onChunkLoad(level, chunk) }
 
-        ServerPlayConnectionEvents.JOIN.register { handler, _, _ ->
+        ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
             val rt = runtime ?: return@register
+            CutsceneGuard.restoreIfPending(server, handler.player)
             rt.notifyProposals()
             if (rt.citizenNation(handler.player) == null) {
                 handler.player.sendSystemMessage(
@@ -51,9 +65,13 @@ object GrandStrategy : ModInitializer {
             }
         }
 
-        ServerPlayConnectionEvents.DISCONNECT.register { handler, _ -> runtime?.hooks?.forget(handler.player.uuid) }
+        ServerPlayConnectionEvents.DISCONNECT.register { handler, server ->
+            CutsceneGuard.release(server, handler.player)
+            runtime?.hooks?.forget(handler.player.uuid)
+        }
 
-        ServerLifecycleEvents.SERVER_STOPPING.register {
+        ServerLifecycleEvents.SERVER_STOPPING.register { server ->
+            server.playerList.players.forEach { CutsceneGuard.release(server, it) }
             runtime?.save()
             LOGGER.info("Saved nation data")
             runtime = null

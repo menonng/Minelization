@@ -6,6 +6,12 @@ fun interface TerrainProvider {
     fun terrain(chunk: Long): Terrain
 }
 
+sealed interface Cinematic {
+    data class Founded(val nation: Int, val ruler: String) : Cinematic
+    data class CapitalFell(val defender: Int, val attacker: Int, val chunk: Long) : Cinematic
+    data class Destroyed(val nation: Int, val by: Int?, val capital: Long) : Cinematic
+}
+
 fun interface PresenceProvider {
     fun playersNear(nation: Int, chunk: Long): Int
 }
@@ -13,6 +19,7 @@ fun interface PresenceProvider {
 class Simulation(val state: WorldState, private val terrainProvider: TerrainProvider) {
     private val terrainCache = HashMap<Long, Terrain>()
     private val listeners = mutableListOf<(GameEvent) -> Unit>()
+    private val cinematicListeners = mutableListOf<(Cinematic) -> Unit>()
     internal val borders = HashMap<Long, Int>()
     internal val aiMemory = HashMap<Long, Long>()
 
@@ -25,6 +32,14 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
 
     fun onEvent(listener: (GameEvent) -> Unit) {
         listeners += listener
+    }
+
+    fun onCinematic(listener: (Cinematic) -> Unit) {
+        cinematicListeners += listener
+    }
+
+    fun cinematic(event: Cinematic) {
+        cinematicListeners.forEach { it(event) }
     }
 
     fun terrain(chunk: Long): Terrain = terrainCache.getOrPut(chunk) { terrainProvider.terrain(chunk) }
@@ -116,6 +131,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         assign(capital, nation)
         ruler?.let { nation.citizens += it }
         log(EventKind.MAJOR, "${nation.name} 건국 ${Chunks.format(capital)}", nation.id)
+        ruler?.let { cinematic(Cinematic.Founded(nation.id, it)) }
         return nation
     }
 
@@ -132,7 +148,8 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         state.nations[previous]?.claims?.remove(chunk)
     }
 
-    fun destroy(nation: Nation, reason: String) {
+    fun destroy(nation: Nation, reason: String, by: Int? = null) {
+        val capital = nation.capital
         nation.alive = false
         for (chunk in nation.claims.toList()) state.owners.remove(chunk)
         nation.claims.clear()
@@ -145,6 +162,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         }
         state.proposals.values.removeIf { it.from == nation.id || it.to == nation.id }
         log(EventKind.MAJOR, "${nation.name} 멸망: $reason", nation.id)
+        cinematic(Cinematic.Destroyed(nation.id, by, capital))
     }
 
     fun seedNations(count: Int, center: Long, radius: Int, attempts: Int = 400): Int {

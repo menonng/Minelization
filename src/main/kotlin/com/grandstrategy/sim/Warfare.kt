@@ -86,12 +86,13 @@ object Warfare {
             if (wasCapital) {
                 defender.stability = (defender.stability - 20).coerceAtLeast(0.0)
                 sim.log(EventKind.MAJOR, "${attacker.name}이(가) ${defender.name}의 수도를 함락했다", attacker.id, defender.id)
+                sim.cinematic(Cinematic.CapitalFell(defender.id, attacker.id, target.second))
                 relocateCapital(sim, defender)
             } else {
                 sim.log(EventKind.WAR, "${attacker.name}이(가) ${defender.name}의 영토 ${Chunks.format(target.second)}를 점령했다", attacker.id, defender.id)
             }
             if (defender.claims.isEmpty()) {
-                sim.destroy(defender, "${attacker.name}에게 모든 영토를 잃음")
+                sim.destroy(defender, "${attacker.name}에게 모든 영토를 잃음", attacker.id)
             }
         } else {
             casualties(sideNations, 0.10)

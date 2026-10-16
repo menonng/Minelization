@@ -13,8 +13,21 @@
         "adapter": "kotlin",
         "value": "com.grandstrategy.GrandStrategy"
       }
+    ],
+    "client": [
+      {
+        "adapter": "kotlin",
+        "value": "com.grandstrategy.client.GrandStrategyClient"
+      }
     ]
   },
+  "mixins": [
+    "grandstrategy.mixins.json",
+    {
+      "config": "grandstrategy.client.mixins.json",
+      "environment": "client"
+    }
+  ],
   "depends": {
     "fabricloader": ">=0.19.3",
     "fabric-api": "*",
