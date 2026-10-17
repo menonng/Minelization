@@ -171,6 +171,14 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
             }
         }
         addRenderableWidget(IconButton(left + panelW - 30, top + 6, 22, 18, Component.literal(""), Items.BARRIER) { onClose() })
+        val player = Minecraft.getInstance().player
+        val spectating = player?.isSpectator == true
+        val mode = IconButton(left + panelW - 54, top + 6, 22, 18, Component.literal(""), if (spectating) Items.ENDER_EYE else Items.LEATHER_BOOTS) {
+            NationMenu.act("mode", if (spectating) "adventure" else "spectator")
+            onClose()
+        }
+        mode.setTooltip(Tooltip.create(Component.literal(if (spectating) "모험 모드로 바꾸기 (땅을 걸어 다닌다)" else "관전 모드로 바꾸기 (하늘에서 본다)")))
+        addRenderableWidget(mode)
         val n = view.nation
         if (n == null) return buildChoose()
         when (page) {
@@ -325,7 +333,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         Ui.panel(g, left, top, panelW, panelH, parchment = true)
         val n = view.nation
         val title = if (n != null) "${n.name} · ${view.turn}턴 · 통치자 ${n.ruler}" else "나라 선택 · ${view.turn}턴"
-        Ui.ribbon(g, font, left + 10, top + 8, panelW - 46, n?.color ?: 0x8A6A3A, Component.literal(title), n?.let { NationMenu.bannerOf(it.dye) } ?: ItemStack(Items.MAP))
+        Ui.ribbon(g, font, left + 10, top + 8, panelW - 70, n?.color ?: 0x8A6A3A, Component.literal(title), n?.let { NationMenu.bannerOf(it.dye) } ?: ItemStack(Items.MAP))
     }
 
     override fun extractRenderState(g: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {

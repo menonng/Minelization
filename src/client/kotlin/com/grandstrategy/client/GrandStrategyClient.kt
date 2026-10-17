@@ -40,6 +40,8 @@ object GrandStrategyClient : ClientModInitializer {
             val message = runCatching { WorkJson.json.decodeFromString(ToClient.serializer(), payload.json) }.getOrNull()
             when (message) {
                 is com.grandstrategy.net.MenuView -> com.grandstrategy.client.ui.NationMenu.onView(message)
+                is com.grandstrategy.net.SetupDone -> net.minecraft.client.Minecraft.getInstance().let { mc -> if (mc.gui.screen() is com.grandstrategy.client.ui.SetupScreen) mc.gui.setScreen(null) }
+                is com.grandstrategy.net.SetupOffer -> net.minecraft.client.Minecraft.getInstance().gui.setScreen(com.grandstrategy.client.ui.SetupScreen(message))
                 is ToClient.Result -> {
                     WorkMode.onMessage(message)
                     com.grandstrategy.client.ui.NationMenu.onResult(message)

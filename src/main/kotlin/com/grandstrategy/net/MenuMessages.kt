@@ -120,3 +120,14 @@ object MapFlags {
     const val TOWN_CENTER = 4
     const val BUILDING = 8
 }
+
+@Serializable
+data class SetupTier(val size: Int, val nations: Int, val label: String, val chunks: Long)
+
+@Serializable
+@SerialName("setup_offer")
+data class SetupOffer(val tiers: List<SetupTier>, val current: Int, val chunky: Boolean, val firstTime: Boolean, val god: Boolean) : ToClient()
+
+@Serializable
+@SerialName("setup_done")
+data class SetupDone(val size: Int) : ToClient()

@@ -7,7 +7,8 @@
     "CameraMixin",
     "HudMixin",
     "ToastManagerMixin",
-    "GameRendererMixin"
+    "GameRendererMixin",
+    "BossHealthOverlayAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

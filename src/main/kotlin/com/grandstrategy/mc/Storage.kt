@@ -18,7 +18,12 @@ class Settings(
     var seedRadiusChunks: Int = 40,
     var minNations: Int = 4,
     var villageProbes: Int = 8,
-    var capitalMarkers: Boolean = true
+    var capitalMarkers: Boolean = true,
+    var worldSize: Int = 0,
+    var godMode: Boolean = true,
+    var pregen: Int = 0,
+    var pregenIndex: Long = 0,
+    val playerModes: MutableMap<String, String> = mutableMapOf()
 )
 
 @Serializable

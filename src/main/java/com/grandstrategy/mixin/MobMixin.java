@@ -13,14 +13,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class MobMixin {
     @Inject(method = "canAttack(Lnet/minecraft/world/entity/LivingEntity;)Z", at = @At("HEAD"), cancellable = true)
     private void grandstrategy$ignoreCutscene(LivingEntity target, CallbackInfoReturnable<Boolean> info) {
-        if (target != null && CutsceneGuard.INSTANCE.isGuarded(target.getUUID())) {
+        if (target != null && (CutsceneGuard.INSTANCE.isGuarded(target.getUUID()) || com.grandstrategy.mc.GodMode.protects(target))) {
             info.setReturnValue(false);
         }
     }
 
     @Inject(method = "setTarget(Lnet/minecraft/world/entity/LivingEntity;)V", at = @At("HEAD"), cancellable = true)
     private void grandstrategy$dropCutsceneTarget(LivingEntity target, CallbackInfo info) {
-        if (target != null && CutsceneGuard.INSTANCE.isGuarded(target.getUUID())) {
+        if (target != null && (CutsceneGuard.INSTANCE.isGuarded(target.getUUID()) || com.grandstrategy.mc.GodMode.protects(target))) {
             info.cancel();
         }
     }

@@ -186,6 +186,17 @@ object GsCommands {
             }))
             .then(literal("accept").then(argument("id", IntegerArgumentType.integer()).executes { answer(it, true) }))
             .then(literal("decline").then(argument("id", IntegerArgumentType.integer()).executes { answer(it, false) }))
+            .then(literal("setup").requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                .executes { ctx -> ctx.source.player?.let { rt().setup.offer(it) }; reply(ctx, Outcome.ok("세계 크기: 500, 1000, 2000, 3500, 5000 (/gs setup <크기> [미리생성 true|false] [조물주 true|false])")) }
+                .then(argument("size", IntegerArgumentType.integer(500, 5000))
+                    .executes { ctx -> setup(ctx, true, true) }
+                    .then(argument("pregen", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                        .executes { ctx -> setup(ctx, com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "pregen"), true) }
+                        .then(argument("god", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                            .executes { ctx -> setup(ctx, com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "pregen"), com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "god")) }))))
+            .then(literal("mode")
+                .then(literal("spectator").executes { ctx -> reply(ctx, rt().setup.setMode(ctx.source.playerOrException, false)) })
+                .then(literal("adventure").executes { ctx -> reply(ctx, rt().setup.setMode(ctx.source.playerOrException, true)) }))
             .then(workCommands())
             .then(admin())
         dispatcher.register(gs)
@@ -247,6 +258,12 @@ object GsCommands {
             })
     }
 
+    private fun setup(ctx: CommandContext<CommandSourceStack>, pregen: Boolean, god: Boolean): Int {
+        val size = IntegerArgumentType.getInteger(ctx, "size")
+        val tier = WorldTier.of(size) ?: return reply(ctx, Outcome.fail("크기는 500, 1000, 2000, 3500, 5000 중 하나"))
+        return reply(ctx, rt().setup.apply(tier, pregen, god, ctx.source.textName))
+    }
+
     private fun buildingAction(ctx: CommandContext<CommandSourceStack>, kind: com.grandstrategy.sim.BuildingKind?): Int {
         val player = ctx.source.playerOrException
         player.connection.send(net.minecraft.network.protocol.game.ClientboundContainerClosePacket(0))
@@ -280,6 +297,9 @@ object GsCommands {
                 ChatFormatting.WHITE)))
         })
         .then(literal("save").executes { ctx -> rt().save(); reply(ctx, Outcome.ok("저장했다.")) })
+        .then(literal("pregen")
+            .then(literal("cancel").executes { ctx -> reply(ctx, rt().setup.cancel()) })
+            .then(literal("status").executes { ctx -> reply(ctx, Outcome.ok("미리 생성 상태 ${rt().settings.pregen} · ${"%.1f".format(rt().setup.progress() * 100)}% (${rt().settings.pregenIndex}청크)")) }))
         .then(literal("cutscene").then(argument("kind", StringArgumentType.word())
             .suggests { _, b -> SharedSuggestionProvider.suggest(CutsceneKind.entries.map { it.name.lowercase() }, b) }
             .then(argument("player", EntityArgument.player()).executes { ctx ->

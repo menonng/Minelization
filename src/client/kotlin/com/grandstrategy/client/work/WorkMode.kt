@@ -269,7 +269,10 @@ object WorkMode {
         var h = 24 + 26 + (if (tool == WorkTool.BUILD) 28 else 0) + 22 + 20 + 14 + 12
         if (orders.isNotEmpty()) h += 12 + orders.size * 20
         if (showToast) h += 14
-        val top = 6
+        val bosses = runCatching {
+            ((Minecraft.getInstance().gui.hud.bossOverlay as Any) as com.grandstrategy.client.mixin.BossHealthOverlayAccessor).`grandstrategy$events`().size
+        }.getOrDefault(0)
+        val top = 6 + bosses * 19
         com.grandstrategy.client.ui.Ui.panel(g, x, top, w, h)
         val header = Component.literal("작업 지정 · ${i?.nation?.ifEmpty { "소속 없음" } ?: "…"}")
         com.grandstrategy.client.ui.Ui.ribbon(g, font, x + 6, top + 6, w - 12, i?.color ?: 0x8A8A8A, header, net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.WRITABLE_BOOK))

@@ -105,6 +105,13 @@ class MenuService(private val rt: Runtime) {
                 return Outcome.ok("${n.name}을(를) 맡았다.")
             }
             "found" -> return Found.found(rt, player, m.a.ifBlank { Names.nation(sim.rng) }.take(32))
+            "mode" -> return rt.setup.setMode(player, m.a == "adventure")
+            "setup" -> {
+                if (!net.minecraft.commands.Commands.LEVEL_GAMEMASTERS.check(player.permissions())) return Outcome.fail("관리자만 정할 수 있다.")
+                val tier = com.grandstrategy.mc.WorldTier.of(m.a.toIntOrNull() ?: 0) ?: return Outcome.fail("크기 오류")
+                val flags = m.b.split(',')
+                return rt.setup.apply(tier, "pregen" in flags, "god" in flags, player.gameProfile.name())
+            }
             "leave" -> {
                 state.rulerNation(uuid)?.let { n ->
                     n.ruler = null

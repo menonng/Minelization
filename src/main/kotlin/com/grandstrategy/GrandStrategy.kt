@@ -41,7 +41,7 @@ object GrandStrategy : ModInitializer {
             val player = context.player()
             CutsceneGuard.finish(player.level().server, player, payload.id)
         }
-        ServerLivingEntityEvents.ALLOW_DAMAGE.register { entity, _, _ -> !CutsceneGuard.isGuarded(entity.uuid) }
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register { entity, _, _ -> !CutsceneGuard.isGuarded(entity.uuid) && !com.grandstrategy.mc.GodMode.protects(entity) }
         CommandRegistrationCallback.EVENT.register { dispatcher, _, _ -> GsCommands.register(dispatcher) }
 
         ServerLifecycleEvents.SERVER_STARTED.register { server ->
@@ -52,7 +52,7 @@ object GrandStrategy : ModInitializer {
                 "Loaded turn {}, {} nations, {} settlements",
                 rt.state.turn, rt.state.alive().size, rt.state.settlements.size
             )
-            rt.hooks.startScouting()
+            rt.setup.start()
         }
 
         ServerTickEvents.END_SERVER_TICK.register { runtime?.tick() }
@@ -62,6 +62,8 @@ object GrandStrategy : ModInitializer {
         ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
             val rt = runtime ?: return@register
             CutsceneGuard.restoreIfPending(server, handler.player)
+            rt.setup.applyMode(handler.player)
+            if (rt.setup.needed()) rt.setup.offer(handler.player)
             rt.notifyProposals()
             if (rt.citizenNation(handler.player) == null) {
                 handler.player.sendSystemMessage(

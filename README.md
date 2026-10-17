@@ -39,7 +39,7 @@
 
 ## 시작하기
 
-1. 월드를 처음 열면 스폰 주변에서 바닐라 마을을 몇 곳 찾고, 그다음 AI 나라 6개를 세운다 (약 10초).
+1. 새 월드를 열면 관리자에게 **세계 준비 화면**이 뜬다. 크기(500 ~ 5000, 5단계)와 미리 생성·조물주 모드를 고르면 월드 경계가 생기고, 바닐라 마을을 찾은 뒤 크기에 맞는 수의 AI 나라가 세워진다. [Chunky](https://modrinth.com/mod/chunky)를 함께 설치하면 미리 생성이 훨씬 빠르다 (선택).
 2. `/gs`로 메뉴를 연다. 소속이 없으면 나라 목록이 나온다. 좌클릭으로 통치자가 되거나, "여기에 건국"으로 새 나라를 세운다.
 3. 1턴은 10초다. 영토를 넓히고(`/gs claim` 또는 지도에서 클릭), 시설을 짓고, 연구하고, 외교한다.
 4. 밀·원목·조약돌·철괴·금괴를 손에 들고 `/gs deposit`하면 국고에 들어간다.
@@ -57,6 +57,9 @@
 | `/gs claim` · `build <시설>` · `recruit <수>` · `research <분야>` · `policy <정책>` · `deposit` | 내정 |
 | `/gs envoy` · `conquer` | 가장 가까운 자유 마을에 사절 / 정복 |
 | `/gs treaty <종류> <국가>` · `untreaty <종류> <국가>` · `war <국가>` · `peace <국가>` · `accept <id>` · `decline <id>` | 외교 |
+| `/gs setup [크기] [미리생성] [조물주]` · `/gs admin pregen status|cancel` | 세계 준비 (OP) |
+| `/gs mode spectator|adventure` | 조물주 모드에서 관전/모험 전환 |
+| `/gs menu <탭>` · `/gs chest` | 나라 메뉴 탭 바로 열기 / 상자 메뉴 |
 | `/gs admin speed <틱>` · `pause` · `resume` · `step [턴]` · `seed <수>` · `perf` · `save` · `reload` | 관리 (OP) |
 
 ## 밸런스 실시간 조정
