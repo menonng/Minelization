@@ -34,5 +34,8 @@
     "fabric-language-kotlin": ">=${fabric_kotlin_version}",
     "minecraft": "~${minecraft_version}",
     "java": ">=25"
+  },
+  "recommends": {
+    "crowdperf": "*"
   }
 }

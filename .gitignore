@@ -4,3 +4,6 @@
 .kotlin/
 /dist/
 local.properties
+/crowdperf/build/
+/crowdperf/run/
+/crowdperf/logs/

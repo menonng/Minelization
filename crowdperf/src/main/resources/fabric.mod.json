@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "crowdperf",
+  "version": "${version}",
+  "name": "CrowdPerf",
+  "description": "Client-side optimisation for crowds of villagers: distant villagers are drawn as one GPU-resident batch rebuilt once per tick instead of a full model per frame, and tick lightly.",
+  "authors": ["menonng"],
+  "contact": { "sources": "https://github.com/menonng/Minelization" },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.grandstrategy.crowdperf.CrowdPerf"]
+  },
+  "mixins": ["crowdperf.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "fabric-api": "*",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=25"
+  }
+}

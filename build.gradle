@@ -33,6 +33,11 @@ loom {
             programArgs "--quickPlayMultiplayer", "localhost:25565", "--username", "Tester"
             vmArg "-XX:ErrorFile=hs_err_%p.log"
             vmArg "-Dgrandstrategy.capture=" + (project.findProperty("capture") ?: "false")
+            vmArg "-Dcrowdperf.log=" + (project.findProperty("capture") ?: "false")
+            if (project.findProperty("crowdBatch") != null) vmArg "-Dcrowdperf.batch=" + project.findProperty("crowdBatch")
+            if (project.findProperty("jfr") != null) {
+                vmArg "-XX:StartFlightRecording=delay=40s,duration=${project.findProperty("jfr")}s,settings=profile,filename=jfr/client.jfr"
+            }
         }
     }
 }
@@ -46,6 +51,9 @@ dependencies {
     if (project.findProperty("withChunky") == "true") {
         runtimeOnly "maven.modrinth:chunky:4Eotm6ov"
     }
+
+    // The crowd optimiser is its own mod; the dev client loads it so it is always tested together.
+    clientRuntimeOnly project(":crowdperf")
 
     testImplementation "org.jetbrains.kotlin:kotlin-test-junit5:${project.kotlin_version}"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
@@ -89,6 +97,7 @@ test {
 
 tasks.register("collect", Copy) {
     from tasks.named("jar")
+    from project(":crowdperf").tasks.named("jar")
     into layout.projectDirectory.dir("dist")
 }
 

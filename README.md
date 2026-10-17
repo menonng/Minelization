@@ -14,7 +14,7 @@
 | Fabric Language Kotlin | 1.14.2+kotlin.2.4.21 |
 | Java | 25 이상 |
 
-싱글플레이: 위 모드를 클라이언트 `mods/`에 넣는다.
+싱글플레이: 위 모드를 클라이언트 `mods/`에 넣는다. 주민이 수천 명이 되므로 클라이언트에 **CrowdPerf**(이 저장소의 `crowdperf/`, 아래 "최적화")를 함께 넣는 것을 권한다.
 전용 서버: 서버 `mods/`에만 넣는다. 접속자는 모드 없이 바닐라 클라이언트로 들어온다 (GUI가 전부 바닐라 상자 메뉴다).
 
 ## 빌드
@@ -25,7 +25,7 @@
 
 `gradle.properties`의 `org.gradle.java.installations.paths`는 이 개발 PC의 JDK 25 경로다. 다른 PC에서는 자기 JDK 25 경로로 바꾸거나 줄을 지운다.
 
-산출물은 `build/libs/`, `./gradlew collect`로 `dist/`에 모인다. 시뮬레이션 단위 테스트는 `./gradlew test`.
+산출물은 `build/libs/`(메인 모드)와 `crowdperf/build/libs/`(CrowdPerf), `./gradlew collect`로 둘 다 `dist/`에 모인다. 시뮬레이션 단위 테스트는 `./gradlew test`.
 
 개발 서버: `./gradlew runServer` (실행 폴더 `run/`).
 
@@ -86,6 +86,15 @@
 | `/gs admin agents vanilla <수>` · `clearvanilla` | 비교용 바닐라 주민 소환 / 제거 |
 
 `balance.json`의 `agents` 항목: `perPopulation`(인구 1당 개체), `max`(전체 상한), `spawnPerTurn`, `visibleRadius`, `maxVisiblePerPlayer`.
+
+## 수용 인구와 과밀
+
+나라마다 땅(지형)·집·시설·연구·시대로 정해지는 **수용 인구**가 있다. 넘으면 성장이 멈추고 안정도·생산이 떨어지며, 전염병·식량 폭동·화재·범죄·파업·대규모 이주·분리 반란 같은 **과밀 사건**이 일어난다(`content.json`의 `crowdEvents`로 수정). 마을 중심이 차면 영토 안에 **새 마을 구역**이 생기고 새 집은 덜 붐비는 곳부터 지어져, 국민이 수도 한 곳에 몰리지 않는다. 자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.13.
+
+## 최적화
+
+- 서버: Lithium · FerriteCore · Krypton · ServerCore · C2ME · ScalableLux, 클라이언트: Sodium · Entity Culling · ImmediatelyFast · Lithium · FerriteCore를 권한다(전부 Modrinth).
+- **CrowdPerf**(`crowdperf/`, 별도 모드, 클라이언트 전용): 32칸 밖 주민을 틱마다 GPU 버퍼 하나로 묶어 한 번에 그린다. 같은 장면에서 최적화 모드만으로 약 230 FPS → CrowdPerf까지 약 1,400~1,900 FPS. 설정은 `config/crowdperf.json`, 명령 `/crowdperf`. 자세한 내용은 [crowdperf/README.md](crowdperf/README.md)와 [docs/ROADMAP.md](docs/ROADMAP.md) 1.14.
 
 ## 세계 지도
 

@@ -1,0 +1,48 @@
+plugins {
+    id 'net.fabricmc.fabric-loom'
+}
+
+version = "${project.crowdperf_version}+${project.minecraft_version}"
+group = project.maven_group
+
+base {
+    archivesName = "crowdperf"
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+processResources {
+    def props = ["version": project.version, "minecraft_version": project.minecraft_version]
+    inputs.properties props
+    filesMatching("fabric.mod.json") {
+        expand props
+    }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = 25
+}
+
+// The mod is run from the root project's dev client (which loads it); its own run tasks would start a second game.
+tasks.matching { it.name.startsWith("run") }.configureEach { enabled = false }
+
+dependencies {
+    testImplementation "org.junit.jupiter:junit-jupiter:5.13.4"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
+    testLogging { events "passed", "failed" }
+}

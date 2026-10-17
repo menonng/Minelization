@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.grandstrategy.crowdperf.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "EntityMixin",
+    "LevelExtractorMixin",
+    "LevelRendererMixin",
+    "ClientLevelMixin",
+    "CrowdRenderDistanceMixin",
+    "VillagerProfessionLayerMixin",
+    "CrossedArmsItemLayerMixin",
+    "CustomHeadLayerMixin",
+    "EntityShadowMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

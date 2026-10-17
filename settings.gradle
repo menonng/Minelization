@@ -7,3 +7,6 @@ pluginManagement {
 }
 
 rootProject.name = 'grandstrategy'
+
+// Standalone client optimisation mod for big crowds (own jar; also loaded by this project's dev client).
+include 'crowdperf'

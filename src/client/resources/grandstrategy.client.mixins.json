@@ -9,12 +9,7 @@
     "ToastManagerMixin",
     "GameRendererMixin",
     "BossHealthOverlayAccessor",
-    "GuiGraphicsExtractorAccessor",
-    "VillagerRenderDistanceMixin",
-    "VillagerProfessionLayerMixin",
-    "CrossedArmsItemLayerMixin",
-    "CustomHeadLayerMixin",
-    "EntityShadowMixin"
+    "GuiGraphicsExtractorAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
