@@ -75,6 +75,7 @@ object WorkMode {
                 toast(message.message, message.ok)
                 if (message.ok) selection = null
             }
+            else -> {}
         }
     }
 

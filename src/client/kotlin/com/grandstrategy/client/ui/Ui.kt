@@ -71,6 +71,16 @@ object Ui {
         }
     }
 
+    fun readable(rgb: Int): Int {
+        val l = luma(rgb)
+        if (l < 110) return rgb
+        val f = 110.0 / l
+        val r = ((rgb shr 16 and 0xFF) * f).toInt()
+        val gg = ((rgb shr 8 and 0xFF) * f).toInt()
+        val b = ((rgb and 0xFF) * f).toInt()
+        return (r shl 16) or (gg shl 8) or b
+    }
+
     fun lighten(rgb: Int, d: Int): Int {
         val r = ((rgb shr 16 and 0xFF) + d).coerceIn(0, 255)
         val gg = ((rgb shr 8 and 0xFF) + d).coerceIn(0, 255)

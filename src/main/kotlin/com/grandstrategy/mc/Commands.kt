@@ -121,7 +121,19 @@ object GsCommands {
 
     fun register(dispatcher: CommandDispatcher<CommandSourceStack>) {
         val gs = literal("gs")
-            .executes { ctx -> NationScreen(ctx.source.playerOrException, rt()).open(); 1 }
+            .executes { ctx ->
+                val player = ctx.source.playerOrException
+                if (!rt().menus.openFor(player)) NationScreen(player, rt()).open()
+                1
+            }
+            .then(literal("chest").executes { ctx -> NationScreen(ctx.source.playerOrException, rt()).open(); 1 })
+            .then(literal("menu").then(argument("page", StringArgumentType.word())
+                .suggests { _, b -> SharedSuggestionProvider.suggest(listOf("overview", "map", "diplomacy", "research", "log"), b) }
+                .executes { ctx ->
+                    val player = ctx.source.playerOrException
+                    if (!rt().menus.openFor(player, StringArgumentType.getString(ctx, "page"))) NationScreen(player, rt()).open()
+                    1
+                }))
             .then(literal("list").executes(::list))
             .then(literal("info").executes { info(it, null) }
                 .then(argument("nation", StringArgumentType.greedyString()).suggests(NATIONS).executes { info(it, nationArg(it)) }))

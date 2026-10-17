@@ -135,15 +135,21 @@ class FoundingScene(spec: CutsceneSpec) : Scene(spec) {
         val title = Ease.window(t, 3.3, 1.2, 10.6, 1.0)
         val sub = Ease.window(t, 4.6, 1.0, 10.6, 1.0)
         val cy = h * 0.40
-        Draw.band(g, cy - 42, cy + 56, 0.5 * title)
-        Draw.centered(g, font, Component.literal(Draw.spaced("건국")), w / 2, cy - 30, 1.0, 0xE8D9A8, label)
-        val drift = (1 - Ease.outCubic((t - 3.3) / 1.6)) * 6
-        Draw.centered(g, font, Component.literal(spec.nation), w / 2, cy - drift, 3.0, spec.color, title)
-        Draw.rule(g, (w / 2).roundToInt(), (cy + 18).roundToInt(), (Ease.outCubic((t - 3.8) / 1.4) * 90).roundToInt(), 0xE8D9A8, title * 0.8)
-        val line = if (spec.subject.isNotEmpty()) "${spec.turn}턴 · 통치자 ${spec.subject}" else "${spec.turn}턴"
-        Draw.centered(g, font, Component.literal(line), w / 2, cy + 30, 1.0, 0xDDDDDD, sub)
-        if (spec.claims.isNotEmpty()) {
-            Draw.centered(g, font, Component.literal("첫 영토 ${spec.claims.size}청크"), w / 2, cy + 44, 0.8, 0xAAAAAA, Ease.window(t, 6.5, 1.0, 10.6, 1.0))
+        val unroll = Ease.outCubic((t - 3.0) / 1.0) * title
+        val plaqueW = maxOf(220.0, font.width(spec.nation) * 3.0 + 80)
+        Draw.plaque(g, w / 2, cy + 6, plaqueW * unroll, 92.0, true, title)
+        if (unroll > 0.85) {
+            Draw.ribbon(g, font, w / 2, cy - 40, 120.0, 0xC89A3A, Draw.spaced("건국"), label)
+            val drift = (1 - Ease.outCubic((t - 3.3) / 1.6)) * 6
+            Draw.icon(g, net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.BANNER.pick(net.minecraft.world.item.DyeColor.byId(spec.dye))),
+                w / 2 - plaqueW / 2 + 24, cy - 2, 2.0, title)
+            Draw.centered(g, font, Component.literal(spec.nation), w / 2 + 12, cy - drift, 3.0, Draw.ink(spec.color), title, shadow = false)
+            Draw.rule(g, (w / 2 + 12).roundToInt(), (cy + 18).roundToInt(), (Ease.outCubic((t - 3.8) / 1.4) * (plaqueW / 2 - 50)).roundToInt(), 0xB08A4A, title)
+            val line = if (spec.subject.isNotEmpty()) "${spec.turn}턴 · 통치자 ${spec.subject}" else "${spec.turn}턴"
+            Draw.centered(g, font, Component.literal(line), w / 2 + 12, cy + 30, 1.0, 0x5A3A16, sub, shadow = false)
+            if (spec.claims.isNotEmpty()) {
+                Draw.centered(g, font, Component.literal("첫 영토 ${spec.claims.size}청크"), w / 2 + 12, cy + 42, 0.8, 0x7A6A54, Ease.window(t, 6.5, 1.0, 10.6, 1.0), shadow = false)
+            }
         }
     }
 
@@ -226,13 +232,19 @@ class CapitalFallScene(spec: CutsceneSpec) : Scene(spec) {
         val title = Ease.window(t, 3.6, 0.5, 9.6, 1.0)
         val sub = Ease.window(t, 4.6, 1.0, 9.6, 1.0)
         val cy = h * 0.42
-        Draw.band(g, cy - 30, cy + 56, 0.45 * title)
-        val punch = 1 + (1 - Ease.outCubic((t - 3.6) / 0.5)) * 0.6
-        Draw.centered(g, font, Component.literal(Draw.spaced("수도 함락")), w / 2, cy, 3.0 * punch, 0xC81E1E, title)
-        Draw.rule(g, (w / 2).roundToInt(), (cy + 20).roundToInt(), (Ease.outCubic((t - 4.0) / 1.0) * 110).roundToInt(), 0xC81E1E, title * 0.7)
         val enemy = spec.other.ifEmpty { "적" }
-        Draw.centered(g, font, Component.literal("${spec.nation}의 수도가 ${enemy}에게 넘어갔다"), w / 2, cy + 32, 1.0, 0xE0E0E0, sub)
-        Draw.centered(g, font, Component.literal("${spec.turn}턴"), w / 2, cy + 46, 0.8, 0x9A9A9A, sub)
+        val message = "${spec.nation}의 수도가 ${enemy}에게 넘어갔다"
+        val plaqueW = maxOf(240.0, font.width(message) + 60.0)
+        Draw.plaque(g, w / 2, cy + 20, plaqueW, 76.0, false, title)
+        val punch = 1 + (1 - Ease.outCubic((t - 3.6) / 0.5)) * 0.4
+        Draw.ribbon(g, font, w / 2, cy - 24, 150.0 * punch, 0xA81E1E, Draw.spaced("수도 함락"), title)
+        Draw.icon(g, net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.BANNER.pick(net.minecraft.world.item.DyeColor.byId(spec.otherDye))),
+            w / 2 - plaqueW / 2 + 22, cy + 8, 1.5, sub)
+        Draw.icon(g, net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.BANNER.pick(net.minecraft.world.item.DyeColor.byId(spec.dye))),
+            w / 2 + plaqueW / 2 - 22, cy + 8, 1.5, sub * 0.5)
+        Draw.centered(g, font, Component.literal(message), w / 2, cy + 12, 1.0, 0xF0E0D0, sub)
+        Draw.rule(g, (w / 2).roundToInt(), (cy + 24).roundToInt(), (Ease.outCubic((t - 4.0) / 1.0) * (plaqueW / 2 - 60)).roundToInt(), 0xC81E1E, title * 0.8)
+        Draw.centered(g, font, Component.literal("${spec.turn}턴"), w / 2, cy + 36, 0.8, 0xA89A8A, sub)
     }
 }
 
@@ -292,6 +304,7 @@ class DestructionScene(spec: CutsceneSpec) : Scene(spec) {
         }
         val name = Ease.window(t, 1.0, 1.2, duration, 1.0)
         val ty = h * 0.62
+        Draw.plaque(g, cx, ty + 18, maxOf(220.0, font.width(spec.nation) * 2.5 + 70), 96.0, false, name)
         Draw.centered(g, font, Component.literal(spec.nation), cx, ty, 2.5, spec.color, name)
         val strike = Ease.outCubic((t - 4.0) / 0.8)
         if (t > 4.0) {

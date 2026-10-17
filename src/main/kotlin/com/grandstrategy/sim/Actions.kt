@@ -127,6 +127,9 @@ object Actions {
                         Outcome.fail("${target.name}이(가) ${action.treaty.label} 조약을 거절했다.")
                     }
                 } else {
+                    if (state.proposals.values.any { it.from == nation.id && it.to == target.id && it.type == "treaty:${action.treaty.name}" }) {
+                        return Outcome.fail("이미 ${target.name}에 같은 제안을 보내 답을 기다리고 있다.")
+                    }
                     val p = sim.propose(nation, target, "treaty:${action.treaty.name}")
                     sim.log(EventKind.DIPLOMACY, "${nation.name}이(가) ${target.name}에 ${action.treaty.label} 조약을 제안했다 #${p.id}", nation.id, target.id)
                     Outcome.ok("${target.name}에 제안을 보냈다. 상대 통치자의 답을 기다린다.")
@@ -159,6 +162,9 @@ object Actions {
                         Outcome.fail("${target.name}이(가) 평화 제안을 거절했다 (상대 전쟁 점수 ${war.scoreFor(target.id).toInt()}).")
                     }
                 } else {
+                    if (state.proposals.values.any { it.from == nation.id && it.to == target.id && it.type == "peace" }) {
+                        return Outcome.fail("이미 평화를 제안해 답을 기다리고 있다.")
+                    }
                     val p = sim.propose(nation, target, "peace")
                     sim.log(EventKind.DIPLOMACY, "${nation.name}이(가) ${target.name}에 평화를 제안했다 #${p.id}", nation.id, target.id)
                     Outcome.ok("${target.name}에 평화를 제안했다.")

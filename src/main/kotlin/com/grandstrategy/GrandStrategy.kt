@@ -77,6 +77,7 @@ object GrandStrategy : ModInitializer {
             runtime?.hooks?.forget(handler.player.uuid)
             runtime?.agentDisplay?.removePlayer(handler.player.uuid)
             runtime?.workService?.forget(handler.player.uuid)
+            runtime?.menus?.forget(handler.player.uuid)
         }
 
         ServerLifecycleEvents.SERVER_STOPPING.register { server ->

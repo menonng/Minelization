@@ -18,6 +18,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
 object GrandStrategyClient : ClientModInitializer {
     override fun onInitializeClient() {
         WorkMode.init()
+        com.grandstrategy.client.ui.NationMenu.init()
         ClientPlayNetworking.registerGlobalReceiver(PlayCutscenePayload.TYPE) { payload, _ ->
             CutscenePlayer.start(CutsceneSpec.decode(payload.json))
         }
@@ -26,14 +27,26 @@ object GrandStrategyClient : ClientModInitializer {
         var shots = 0
         ClientTickEvents.END_CLIENT_TICK.register { mc ->
             CutscenePlayer.tick()
-            if (!CutscenePlayer.active) WorkMode.tick(mc)
+            if (!CutscenePlayer.active) {
+                WorkMode.tick(mc)
+                com.grandstrategy.client.ui.NationMenu.tick(mc)
+            }
             if (capture && mc.level != null && !CutscenePlayer.active && ++ticks % 200 == 0) {
                 Screenshot.grab(mc.gameDirectory, "view_%03d.png".format(shots++), mc.gameRenderer.mainRenderTarget(), 1) { }
             }
         }
         ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> CutscenePlayer.stop(false) }
         ClientPlayNetworking.registerGlobalReceiver(ServerMessagePayload.TYPE) { payload, _ ->
-            runCatching { WorkJson.json.decodeFromString(ToClient.serializer(), payload.json) }.getOrNull()?.let { WorkMode.onMessage(it) }
+            val message = runCatching { WorkJson.json.decodeFromString(ToClient.serializer(), payload.json) }.getOrNull()
+            when (message) {
+                is com.grandstrategy.net.MenuView -> com.grandstrategy.client.ui.NationMenu.onView(message)
+                is ToClient.Result -> {
+                    WorkMode.onMessage(message)
+                    com.grandstrategy.client.ui.NationMenu.onResult(message)
+                }
+                null -> {}
+                else -> WorkMode.onMessage(message)
+            }
         }
         ClientPreAttackCallback.EVENT.register { _, _, _ -> WorkMode.swallowAttack() }
         ClientTickEvents.START_CLIENT_TICK.register { mc -> WorkMode.blockVanillaInput(mc) }

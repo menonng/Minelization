@@ -57,13 +57,28 @@ data class CutsceneDonePayload(val id: Int) : CustomPacketPayload {
     }
 }
 
+object Packed {
+    private const val LIMIT = 4 * 1024 * 1024
+
+    val CODEC: StreamCodec<io.netty.buffer.ByteBuf, String> = ByteBufCodecs.byteArray(LIMIT).map(::inflate, ::deflate)
+
+    private fun deflate(text: String): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.GZIPOutputStream(out).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+        return out.toByteArray()
+    }
+
+    private fun inflate(bytes: ByteArray): String =
+        java.util.zip.GZIPInputStream(bytes.inputStream()).use { it.readBytes().toString(Charsets.UTF_8) }
+}
+
 data class ClientMessagePayload(val json: String) : CustomPacketPayload {
     override fun type(): CustomPacketPayload.Type<ClientMessagePayload> = TYPE
 
     companion object {
         val TYPE = CustomPacketPayload.Type<ClientMessagePayload>(Identifier.fromNamespaceAndPath("grandstrategy", "client_message"))
         val CODEC: StreamCodec<RegistryFriendlyByteBuf, ClientMessagePayload> =
-            StreamCodec.composite(ByteBufCodecs.STRING_UTF8, ClientMessagePayload::json, ::ClientMessagePayload)
+            StreamCodec.composite(Packed.CODEC, ClientMessagePayload::json, ::ClientMessagePayload)
     }
 }
 
@@ -73,6 +88,6 @@ data class ServerMessagePayload(val json: String) : CustomPacketPayload {
     companion object {
         val TYPE = CustomPacketPayload.Type<ServerMessagePayload>(Identifier.fromNamespaceAndPath("grandstrategy", "server_message"))
         val CODEC: StreamCodec<RegistryFriendlyByteBuf, ServerMessagePayload> =
-            StreamCodec.composite(ByteBufCodecs.STRING_UTF8, ServerMessagePayload::json, ::ServerMessagePayload)
+            StreamCodec.composite(Packed.CODEC, ServerMessagePayload::json, ::ServerMessagePayload)
     }
 }

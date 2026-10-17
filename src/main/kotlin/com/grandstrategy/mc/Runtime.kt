@@ -26,6 +26,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
     val agentDisplay = AgentDisplay(this, population)
     val work = com.grandstrategy.mc.build.WorkManager(this)
     val workService = com.grandstrategy.mc.build.WorkService(this, work)
+    val menus = com.grandstrategy.mc.ui.MenuService(this)
     var agentNanos = 0L
         private set
     val observers = HashMap<UUID, Boolean>()
@@ -68,6 +69,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         agentNanos = System.nanoTime() - agentStart
         work.tick()
         workService.tick()
+        menus.tick()
         if (!settings.paused && state.seeded && ticks % settings.turnTicks.coerceAtLeast(1) == 0L) runTurn()
         if (ticks % AUTOSAVE_TICKS == 0L) save()
     }
