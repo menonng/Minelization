@@ -64,6 +64,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         computeBorders()
         Economy.run(this)
         Progress.run(this)
+        Population.run(this)
         Settlements.run(this)
         Diplomacy.run(this)
         Ai.run(this)

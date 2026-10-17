@@ -609,7 +609,9 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
             ink(g, value, xx + 22 + font.width(label) + 5, yy, 0x6B5A44)
             Ui.bar(g, xx + 22, yy + 10, w - 22, fraction, rgb)
         }
-        stat(cx, cy + 40, colW, Items.CAKE, "인구", "${n.population.toInt()} / ${n.housing.toInt()}", n.population / n.housing.coerceAtLeast(1.0), 0x5AA0E0)
+        val crowded = n.population > n.housing
+        stat(cx, cy + 40, colW, Items.CAKE, if (crowded) "인구 · 과밀!" else "인구 / 수용", "${n.population.toInt()} / ${n.housing.toInt()}",
+            n.population / n.housing.coerceAtLeast(1.0), if (crowded) 0xE05A3A else 0x5AA0E0)
         stat(col2, cy + 40, colW - 74, Items.IRON_SWORD, "병력", "${n.military.toInt()}/${n.recruitCap.toInt()}", n.military / n.recruitCap.coerceAtLeast(1.0), 0xC04A3A)
         ink(g, "전투력 ${NationMenu.number(n.strength)}", col2 + 22, cy + 60, 0x6B5A44)
         stat(cx, cy + 70, colW, Items.BELL, "안정도", "${n.stability.toInt()}${if (n.wars > 0) " · 전쟁 ${n.wars}" else ""}", n.stability / 100,

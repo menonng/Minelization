@@ -201,7 +201,11 @@ class Nation(
     /** Chosen ideology id (see content.json), and the era last announced. */
     var ideology: String? = null,
     var era: String? = null,
-    var ideologyTurn: Long = 0
+    var ideologyTurn: Long = 0,
+    /** Carrying capacity as of the last turn, and an active production penalty from an overcrowding event. */
+    var capacity: Double = 0.0,
+    var crowdPenalty: Double = 0.0,
+    var crowdPenaltyTurns: Int = 0
 ) {
     val aiControlled: Boolean get() = ruler == null || autoGovern
 

@@ -32,7 +32,7 @@ object Economy {
                 Resource.WOOD -> 1.0 + 0.05 * nation.level(TechBranch.INDUSTRY)
                 else -> 1.0 + 0.1 * nation.level(TechBranch.MINING)
             }
-            result[r] = (base[r] ?: 0.0) * labor * facility * tech * policy * unrest * Content.productionFactor(nation)
+            result[r] = (base[r] ?: 0.0) * labor * facility * tech * policy * unrest * Content.productionFactor(nation) * Population.productionFactor(nation)
         }
         var tax = nation.population * Balance.TAX_PER_POP
         if (nation.policy == Policy.SCIENCE) tax *= 0.9
@@ -47,12 +47,8 @@ object Economy {
         Resource.GOLD to nation.military * Balance.GOLD_PER_SOLDIER + nation.claims.size * Balance.GOLD_PER_CHUNK
     )
 
-    fun housing(sim: Simulation, nation: Nation): Double {
-        val towns = sim.state.settlements.values.filter { it.owner == nation.id }.sumOf { it.population }
-        val houses = sim.state.buildings.values.count { it.nation == nation.id && it.complete && it.kind == BuildingKind.HOUSE }
-        return nation.claims.size * Balance.HOUSING_PER_CHUNK + nation.totalFacilities() * Balance.HOUSING_PER_FACILITY + towns +
-            houses * Balance.config.housingPerHouse
-    }
+    /** How many people the nation can support; see [Population.capacity]. */
+    fun housing(sim: Simulation, nation: Nation): Double = Population.capacity(sim, nation)
 
     fun science(nation: Nation): Double {
         var s = nation.population * Balance.SCIENCE_PER_POP * (1.0 + 0.15 * nation.level(TechBranch.EDUCATION))
@@ -75,10 +71,12 @@ object Economy {
         nation.lastIncome = net
 
         val cap = housing(sim, nation)
+        nation.capacity = cap
         if (starving) {
             nation.population *= 1.0 - Balance.STARVATION_LOSS
         } else {
-            val room = 1.0 - nation.population / max(1.0, cap)
+            // Growth only while there is room; past capacity the population stops growing and overcrowding bites.
+            val room = (1.0 - nation.population / max(1.0, cap)).coerceAtLeast(0.0)
             nation.population += nation.population * Balance.GROWTH_RATE * Content.growthFactor(nation) * room + if (room > 0) 0.5 else 0.0
         }
         nation.population = nation.population.coerceAtLeast(1.0)
@@ -94,7 +92,8 @@ object Economy {
             sim.log(EventKind.ECONOMY, "${nation.name}: ${nation.researchFocus.label} 기술 ${level}단계 달성", nation.id)
         }
 
-        var target = Balance.BASE_STABILITY + 3.0 * nation.level(TechBranch.ADMINISTRATION) + Content.stabilityBonus(nation)
+        var target = Balance.BASE_STABILITY + 3.0 * nation.level(TechBranch.ADMINISTRATION) + Content.stabilityBonus(nation) -
+            Population.stabilityPenalty(nation)
         val over = nation.claims.size - Balance.overextensionLimit(nation)
         if (over > 0) target -= over * 0.5
         val exhaustion = sim.state.warsOf(nation.id).maxOfOrNull { it.exhaustionOf(nation.id) } ?: 0.0

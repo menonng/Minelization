@@ -64,10 +64,16 @@ class VillagePlanner(private val rt: Runtime, private val shownCheck: (Int) -> B
             Job.CHILD -> emptySet()
         }
         if (kinds.isEmpty()) return null
+        val job = Job.entries[agents.job[i].toInt()]
+        // People who work the land mostly do it around their own home; only some walk to a farm or camp building.
+        if ((job == Job.FARMER || job == Job.LUMBERJACK || job == Job.MINER) && rng.nextFloat() < LAND_WORK) return null
         val nation = agents.nation[i]
         val hx = agents.homeX[i]
         val hz = agents.homeZ[i]
-        val near = buildings(nation, kinds).sortedBy { (it.box.centerX - hx) * (it.box.centerX - hx) + (it.box.centerZ - hz) * (it.box.centerZ - hz) }.take(3)
+        // Nobody commutes across the country: only workplaces within reach of home count.
+        val near = buildings(nation, kinds)
+            .filter { (it.box.centerX - hx) * (it.box.centerX - hx) + (it.box.centerZ - hz) * (it.box.centerZ - hz) <= COMMUTE * COMMUTE }
+            .sortedBy { (it.box.centerX - hx) * (it.box.centerX - hx) + (it.box.centerZ - hz) * (it.box.centerZ - hz) }.take(3)
         if (near.isEmpty()) return null
         val b = near[rng.nextInt(near.size)].box
         return ring(b, rng)
@@ -108,5 +114,7 @@ class VillagePlanner(private val rt: Runtime, private val shownCheck: (Int) -> B
 
     private companion object {
         const val HOUSE_CAPACITY = 5
+        const val COMMUTE = 64.0
+        const val LAND_WORK = 0.65f
     }
 }

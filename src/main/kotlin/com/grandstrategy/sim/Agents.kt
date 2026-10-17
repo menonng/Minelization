@@ -271,7 +271,10 @@ class Agents(initial: Int = 1024) {
                     return
                 }
                 // A third head for a public place; the rest visit neighbours near home.
-                val public = if (rng.nextFloat() < 0.35f) planner.meeting(nation[i], rng) else null
+                val public = (if (rng.nextFloat() < 0.35f) planner.meeting(nation[i], rng) else null)?.takeIf { (mx, mz) ->
+                    // Only a place within an easy walk; people far out in the country gather near home instead.
+                    (mx - homeX[i]) * (mx - homeX[i]) + (mz - homeZ[i]) * (mz - homeZ[i]) <= 96f * 96f
+                }
                 if (public != null) wander(i, public.first, public.second, 10f, AgentState.TO_SOCIAL, rng)
                 else wander(i, homeX[i], homeZ[i], 9f, AgentState.TO_SOCIAL, rng)
             }

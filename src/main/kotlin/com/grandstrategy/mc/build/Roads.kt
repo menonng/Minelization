@@ -262,6 +262,15 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
             }
         }
         if (nation.id in frontage || buildings.isEmpty() && network.cellsOf(nation.id).size < 40) {
+            // Every town core is full: found a new district out in the nation's land instead of packing the old ones.
+            if (districtDue(nation) && !cooling("district:${nation.id}")) {
+                if (newDistrict(nation, ground)) {
+                    frontage -= nation.id
+                    lastReason[nation.id] = "새 마을 구역"
+                    return true
+                }
+                coolDown("district:${nation.id}", 2400)
+            }
             if (extend(nation, ground, hub)) {
                 frontage -= nation.id
                 lastReason[nation.id] = "새 길 (집 지을 자리)"
@@ -273,6 +282,73 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
     }
 
     private fun ground() = WorldRoadGround(level) { rt.sim.terrain(it) }
+
+    /** Centres of the nation's town cores: its plazas (the capital's first). */
+    fun hubs(nation: Nation): List<Pair<Int, Int>> {
+        val plazas = state.roads.values.filter { it.nation == nation.id && it.kind == RoadKind.PLAZA && it.cells.isNotEmpty() }.map { r ->
+            r.cells.sumOf { Chunks.x(it) } / r.cells.size to r.cells.sumOf { Chunks.z(it) } / r.cells.size
+        }
+        return plazas.ifEmpty { listOf(Chunks.x(nation.capital) * 16 + 8 to Chunks.z(nation.capital) * 16 + 8) }
+    }
+
+    private fun crowd(hub: Pair<Int, Int>, nation: Nation): Int = state.buildings.values.count {
+        it.nation == nation.id && kotlin.math.abs(it.box.centerX - hub.first) < 48 && kotlin.math.abs(it.box.centerZ - hub.second) < 48
+    }
+
+    private fun districtDue(nation: Nation): Boolean {
+        val hubs = hubs(nation)
+        if (hubs.size >= 1 + nation.claims.size / tuning.chunksPerDistrict.coerceAtLeast(1)) return false
+        return hubs.all { crowd(it, nation) >= tuning.districtBuildings }
+    }
+
+    /**
+     * Founds a district: picks an own chunk some way out from every town core (towns the nation owns and fertile land
+     * first), lays a highway from there to the network and a plaza at its centre. New houses then prefer it, so people
+     * spread over the land instead of all crowding the capital.
+     */
+    private fun newDistrict(nation: Nation, ground: RoadGround): Boolean {
+        val hubs = hubs(nation).map { Chunks.pack(it.first shr 4, it.second shr 4) }
+        val boxes = state.buildings.values.map { it.box }
+        val capacity = Balance.config.capacity.perChunk
+        val candidates = nation.claims.filter { c ->
+            val t = rt.sim.terrain(c)
+            t != Terrain.WATER && t != Terrain.MOUNTAIN && !cooling("dc:$c") &&
+                hubs.all { Chunks.distance(c, it) >= tuning.districtSpacing } && hubs.any { Chunks.distance(c, it) <= tuning.districtReach } &&
+                boxes.none { b -> (b.minX shr 4) - 1 <= Chunks.x(c) && Chunks.x(c) <= (b.maxX shr 4) + 1 && (b.minZ shr 4) - 1 <= Chunks.z(c) && Chunks.z(c) <= (b.maxZ shr 4) + 1 }
+        }.sortedByDescending { c ->
+            (capacity[rt.sim.terrain(c)] ?: 1.0) + (if (state.settlementLand[c] != null) 3.0 else 0.0) - hubs.minOf { Chunks.distance(c, it) } * 0.15 +
+                rt.sim.rng.nextDouble()
+        }
+        for (c in candidates.take(4)) {
+            val x = Chunks.x(c) * 16 + 8
+            val z = Chunks.z(c) * 16 + 8
+            val blocked = blocker(nation, x, z, tuning.highwayRange + 16)
+            if (ground.height(x, z) == null || blocked(x, z)) {
+                coolDown("dc:$c", 6000)
+                continue
+            }
+            val own = network.cellsOf(nation.id)
+            val target = own.minByOrNull { dist2(x.toDouble(), z.toDouble(), it) } ?: return false
+            val path = RoadPathfinder.find(
+                ground, x, z, Chunks.x(target), Chunks.z(target),
+                goal = { network.nationAt(it) == nation.id },
+                existing = { network.nationAt(it) == nation.id },
+                blocked = blocked, range = tuning.highwayRange, maxNodes = tuning.highwayNodes, greed = 1.3
+            )
+            if (path == null) {
+                failed++
+                coolDown("dc:$c", 6000)
+                continue
+            }
+            val wide = RoadPathfinder.widen(path, 2, ground, blocked).filter { !network.isRoad(it) }
+            val plaza = RoadPathfinder.plaza(x, z, 2, ground, blocked).filter { !network.isRoad(it) }
+            if (wide.isNotEmpty()) order(nation, RoadKind.HIGHWAY, wide)
+            if (plaza.size >= 5) order(nation, RoadKind.PLAZA, plaza)
+            com.grandstrategy.GrandStrategy.LOGGER.info("New district for {} at chunk {}", nation.name, Chunks.format(c))
+            return true
+        }
+        return false
+    }
 
     fun wantFrontage(nation: Int) {
         frontage += nation
@@ -331,10 +407,17 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
     fun findLot(nation: Nation, width: Int, depth: Int): Pair<Box, Int>? {
         val cells = network.cellsOf(nation.id)
         if (cells.isEmpty()) return null
-        val hx = Chunks.x(nation.capital) * 16 + 8
-        val hz = Chunks.z(nation.capital) * 16 + 8
         val buildings = state.buildings.values.toList()
-        return RoadLots.find(cells, hx, hz, width, depth, rt.sim.rng, { box -> lotOk(nation, box, buildings) })
+        // Near a town core, but the less crowded cores first: each building already there counts as 4 blocks of walking.
+        val hubs = hubs(nation).map { h -> Triple(h.first, h.second, crowd(h, nation) * 4.0) }
+        val score = { c: Long ->
+            hubs.minOf { (hx, hz, penalty) ->
+                val dx = (Chunks.x(c) - hx).toDouble()
+                val dz = (Chunks.z(c) - hz).toDouble()
+                kotlin.math.sqrt(dx * dx + dz * dz) + penalty
+            }
+        }
+        return RoadLots.find(cells, score, width, depth, rt.sim.rng, { box -> lotOk(nation, box, buildings) })
     }
 
     private fun lotOk(nation: Nation, box: Box, buildings: List<Building>): Boolean {

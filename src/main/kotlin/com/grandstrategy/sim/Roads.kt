@@ -264,13 +264,23 @@ object RoadLots {
         rng: kotlin.random.Random,
         valid: (Box) -> Boolean,
         tries: Int = 240
+    ): Pair<Box, Int>? = find(cells, { c ->
+        val dx = (Chunks.x(c) - hubX).toDouble()
+        val dz = (Chunks.z(c) - hubZ).toDouble()
+        kotlin.math.sqrt(dx * dx + dz * dz)
+    }, sizeX, sizeZ, rng, valid, tries)
+
+    /** Lots beside the road cells with the lowest [score] first (plus a little jitter so towns don't grow in straight lines). */
+    fun find(
+        cells: List<Long>,
+        score: (Long) -> Double,
+        sizeX: Int, sizeZ: Int,
+        rng: kotlin.random.Random,
+        valid: (Box) -> Boolean,
+        tries: Int = 240
     ): Pair<Box, Int>? {
         if (cells.isEmpty()) return null
-        val ordered = cells.map { c ->
-            val dx = (Chunks.x(c) - hubX).toDouble()
-            val dz = (Chunks.z(c) - hubZ).toDouble()
-            c to kotlin.math.sqrt(dx * dx + dz * dz) + rng.nextDouble() * 10.0
-        }.sortedBy { it.second }
+        val ordered = cells.map { c -> c to score(c) + rng.nextDouble() * 10.0 }.sortedBy { it.second }
         var checked = 0
         for ((cell, _) in ordered) {
             for ((box, side) in candidates(cell, sizeX, sizeZ).shuffled(rng)) {

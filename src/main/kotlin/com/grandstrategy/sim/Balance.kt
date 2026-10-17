@@ -54,6 +54,35 @@ data class AgentTuning(
     val spawnsPerUpdate: Int = 600
 )
 
+/** Carrying capacity (see [Population]) and how hard overcrowding bites. */
+@Serializable
+data class CapacityTuning(
+    /** People one chunk of each terrain supports without buildings. */
+    val perChunk: Map<Terrain, Double> = mapOf(
+        Terrain.PLAINS to 3.0, Terrain.FOREST to 2.0, Terrain.TAIGA to 1.5, Terrain.JUNGLE to 2.0, Terrain.SAVANNA to 2.5,
+        Terrain.DESERT to 0.8, Terrain.BADLANDS to 0.5, Terrain.HILLS to 1.5, Terrain.MOUNTAIN to 0.5, Terrain.SNOWY to 1.0,
+        Terrain.RIVER to 3.5, Terrain.COAST to 2.5, Terrain.WATER to 0.0
+    ),
+    val perHouse: Double = 8.0,
+    val perFacility: Map<Facility, Double> = mapOf(
+        Facility.FARM to 15.0, Facility.LUMBER_CAMP to 4.0, Facility.QUARRY to 4.0, Facility.MINE to 4.0,
+        Facility.MARKET to 8.0, Facility.LIBRARY to 4.0, Facility.BARRACKS to 10.0, Facility.WALLS to 2.0
+    ),
+    val capital: Double = 30.0,
+    /** Agriculture and administration levels raise capacity by this much each, up to [techMax] times. */
+    val techPerLevel: Double = 0.02,
+    val techMax: Double = 1.6,
+    /** Extra capacity per era reached. */
+    val perEra: Double = 0.05,
+    /** Chance per turn of an overcrowding event, per unit of overcrowding (0.4 → 20% when 50% over), capped. */
+    val eventRate: Double = 0.4,
+    val eventMaxChance: Double = 0.6,
+    /** Stability target lost, and production lost (down to the floor), per 100% over capacity. */
+    val stabilityPerOver: Double = 25.0,
+    val productionPerOver: Double = 0.5,
+    val productionFloor: Double = 0.6
+)
+
 @Serializable
 data class RoadTuning(
     /** Ticks between road planning attempts; each attempt serves one nation, round robin. */
@@ -63,7 +92,14 @@ data class RoadTuning(
     val highwayRange: Int = 200,
     val streetNodes: Int = 12000,
     val highwayNodes: Int = 40000,
-    val workers: Int = 4
+    val workers: Int = 4,
+    /** A town core counts as full at this many buildings; when every core is full, a new district is founded. */
+    val districtBuildings: Int = 24,
+    /** Districts are at least this many chunks from other town cores, and at most [districtReach] from the nearest. */
+    val districtSpacing: Int = 5,
+    val districtReach: Int = 12,
+    /** One district per this many claimed chunks (plus the capital). */
+    val chunksPerDistrict: Int = 50
 )
 
 @Serializable
@@ -125,7 +161,8 @@ data class BalanceConfig(
     val terrain: Map<Terrain, Yields> = Terrain.entries.associateWith { Yields(it.food, it.wood, it.stone, it.iron, it.gold) },
     val ai: AiTuning = AiTuning(),
     val agents: AgentTuning = AgentTuning(),
-    val roads: RoadTuning = RoadTuning()
+    val roads: RoadTuning = RoadTuning(),
+    val capacity: CapacityTuning = CapacityTuning()
 ) {
     fun problems(): List<String> = buildList {
         if (workersPerChunk <= 0) add("workersPerChunk must be > 0")

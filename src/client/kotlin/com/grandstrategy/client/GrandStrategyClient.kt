@@ -43,6 +43,18 @@ object GrandStrategyClient : ClientModInitializer {
             }
             if (capture && mc.level != null && !CutscenePlayer.active && ++ticks % 200 == 0) {
                 Screenshot.grab(mc.gameDirectory, "view_%03d.png".format(shots++), mc.gameRenderer.mainRenderTarget(), 1) { }
+                // Performance probe for automated runs: frame rate against the size of the crowd in view.
+                val level = mc.level
+                if (level != null) {
+                    var villagers = 0
+                    var near = 0
+                    val eye = mc.player?.position()
+                    for (e in level.entitiesForRendering()) if (e is net.minecraft.world.entity.npc.villager.Villager) {
+                        villagers++
+                        if (eye != null && e.distanceToSqr(eye) < 40.0 * 40.0) near++
+                    }
+                    com.grandstrategy.GrandStrategy.LOGGER.info("[perf] fps {} entities {} villagers {} (within 40: {})", mc.fps, level.entityCount, villagers, near)
+                }
             }
         }
         ClientPlayConnectionEvents.DISCONNECT.register { _, _ ->

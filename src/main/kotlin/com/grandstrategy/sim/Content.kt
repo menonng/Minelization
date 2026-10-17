@@ -90,20 +90,44 @@ data class IdeologyDef(
     val description: String = ""
 )
 
+/**
+ * Something that can happen to an overcrowded nation. Rolled each turn with a chance that grows with overcrowding;
+ * [minRatio] is the population/capacity ratio from which it can happen. Text placeholders: {nation} {lost} {moved} {target}.
+ */
+@Serializable
+data class CrowdEventDef(
+    val id: String,
+    val name: String,
+    val weight: Double = 1.0,
+    val minRatio: Double = 1.0,
+    val populationLoss: Double = 0.0,
+    val stability: Double = 0.0,
+    val stockLoss: Map<Resource, Double> = emptyMap(),
+    val emigration: Double = 0.0,
+    val productionPenalty: Double = 0.0,
+    val penaltyTurns: Int = 0,
+    /** Splits off a rebel nation; only rolls while stability is below 25. */
+    val revolt: Boolean = false,
+    /** Announced to everyone instead of only the nation. */
+    val major: Boolean = false,
+    val text: String = "{nation}: 과밀"
+)
+
 @Serializable
 data class ContentConfig(
     val eras: List<EraDef> = Defaults.eras,
     val techs: List<TechDef> = Defaults.techs,
     val weapons: List<WeaponDef> = Defaults.weapons,
     val energy: List<EnergyDef> = Defaults.energy,
-    val ideologies: List<IdeologyDef> = Defaults.ideologies
+    val ideologies: List<IdeologyDef> = Defaults.ideologies,
+    val crowdEvents: List<CrowdEventDef> = Defaults.crowdEvents
 ) {
     /** Mistakes that would make the content unusable; an empty list means it can be applied. */
     fun problems(): List<String> {
         val out = ArrayList<String>()
         if (eras.isEmpty()) out += "시대가 하나도 없다"
         val blank = (eras.map { it.id to it.name } + techs.map { it.id to it.name } + weapons.map { it.id to it.name } +
-            energy.map { it.id to it.name } + ideologies.map { it.id to it.name }).filter { (_, name) -> name.isBlank() || name.any { it.isISOControl() } }
+            energy.map { it.id to it.name } + ideologies.map { it.id to it.name } + crowdEvents.map { it.id to it.name }).filter { (_, name) -> name.isBlank() || name.any { it.isISOControl() } }
         if (blank.isNotEmpty()) out += "이름이 비었다: ${blank.joinToString { it.first }}"
         if (eras.zipWithNext().any { (a, b) -> b.techTotal < a.techTotal }) out += "시대는 techTotal 오름차순이어야 한다"
         val eraIds = eras.map { it.id }.toSet()
@@ -123,6 +147,9 @@ data class ContentConfig(
         if (weapons.none { it.wmd == null && met(it.requires, emptyNation) }) out += "처음부터 쓸 수 있는 재래식 무기가 없다"
         if (energy.none { met(it.requires, emptyNation) }) out += "처음부터 쓸 수 있는 에너지가 없다"
         if (weapons.any { it.attack <= 0 } || energy.any { it.output <= 0 }) out += "attack·output은 0보다 커야 한다"
+        if (crowdEvents.any { it.weight < 0 || it.populationLoss !in 0.0..1.0 || it.emigration !in 0.0..1.0 || it.productionPenalty !in 0.0..1.0 }) {
+            out += "과밀 사건 값은 weight ≥ 0, 비율은 0~1이어야 한다"
+        }
         return out
     }
 
@@ -268,6 +295,23 @@ object Defaults {
         EnergyDef("fusion_power", "핵융합 발전", r("near_future", techs = listOf("fusion")), 2.6),
         EnergyDef("artificial_sun", "인공 태양", r("far_future", techs = listOf("fusion")), 3.2),
         EnergyDef("dyson", "다이슨 구조물", r("stellar", techs = listOf("stellar_engineering")), 4.5)
+    )
+
+    val crowdEvents = listOf(
+        CrowdEventDef("plague", "전염병", weight = 2.0, minRatio = 1.1, populationLoss = 0.1, stability = -8.0, major = true,
+            text = "{nation}의 비좁은 거리에 전염병이 돌아 {lost}명이 죽었다"),
+        CrowdEventDef("food_riot", "식량 폭동", weight = 3.0, minRatio = 1.0, stability = -10.0, stockLoss = mapOf(Resource.FOOD to 0.35),
+            text = "{nation}: 먹을 것이 모자라 식량 창고가 약탈당했다"),
+        CrowdEventDef("slum_fire", "빈민가 화재", weight = 1.5, minRatio = 1.15, populationLoss = 0.03, stability = -5.0,
+            stockLoss = mapOf(Resource.WOOD to 0.25), text = "{nation}의 빈민가에 큰불이 나 {lost}명이 죽고 목재가 타 버렸다"),
+        CrowdEventDef("crime", "범죄 증가", weight = 3.0, minRatio = 1.0, stability = -6.0, stockLoss = mapOf(Resource.GOLD to 0.2),
+            text = "{nation}: 일자리 없는 사람이 늘어 도둑과 강도가 들끓는다"),
+        CrowdEventDef("strike", "파업", weight = 2.0, minRatio = 1.05, stability = -4.0, productionPenalty = 0.25, penaltyTurns = 5,
+            text = "{nation}의 노동자들이 일손을 놓았다 (5턴 동안 생산 -25%)"),
+        CrowdEventDef("emigration", "대규모 이주", weight = 2.0, minRatio = 1.2, stability = -2.0, emigration = 0.08,
+            text = "{nation}에서 {moved}명이 살 곳을 찾아 {target}(으)로 떠났다"),
+        CrowdEventDef("revolt", "폭동과 분리", weight = 1.0, minRatio = 1.35, stability = -15.0, revolt = true, major = true,
+            text = "{nation}의 과밀한 변방이 들고일어났다")
     )
 
     val ideologies = listOf(
