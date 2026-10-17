@@ -57,7 +57,11 @@ object GrandStrategy : ModInitializer {
 
         ServerTickEvents.END_SERVER_TICK.register { runtime?.tick() }
 
-        ServerChunkEvents.CHUNK_LOAD.register { level, chunk, _ -> runtime?.hooks?.onChunkLoad(level, chunk) }
+        ServerChunkEvents.CHUNK_LOAD.register { level, chunk, _ ->
+            runtime?.hooks?.onChunkLoad(level, chunk)
+            runtime?.map?.onChunk(level, chunk)
+        }
+        ServerChunkEvents.CHUNK_UNLOAD.register { level, chunk -> runtime?.map?.onChunk(level, chunk) }
 
         ServerPlayConnectionEvents.JOIN.register { handler, _, server ->
             val rt = runtime ?: return@register

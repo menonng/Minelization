@@ -181,6 +181,10 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         addRenderableWidget(mode)
         val n = view.nation
         if (n == null) return buildChoose()
+        if (page == "map") button(left + panelW - 120, top + panelH - 30, 106, "전체 지도", Items.FILLED_MAP, "[M] 세계 지도 열기") {
+            onClose()
+            WorldMap.open()
+        }
         when (page) {
             "overview" -> buildOverview()
             "diplomacy" -> buildDiplomacy()

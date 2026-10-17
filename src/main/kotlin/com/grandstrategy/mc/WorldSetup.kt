@@ -183,7 +183,10 @@ class WorldSetup(private val rt: Runtime) {
             settings.pregenIndex++
             val x = cx + dx
             val z = cz + dz
-            if (level.chunkSource.hasChunk(x, z)) continue
+            if (level.chunkSource.hasChunk(x, z)) {
+                if (rebuilding) level.chunkSource.getChunkNow(x, z)?.let { rt.map.onChunk(level, it) }
+                continue
+            }
             inflight += level.chunkSource.getChunkFuture(x, z, ChunkStatus.FULL, true)
         }
     }
@@ -204,9 +207,13 @@ class WorldSetup(private val rt: Runtime) {
             "chunky shape square",
             "chunky center ${spawn.x} ${spawn.z}",
             "chunky radius $radius",
-            "chunky start"
+            "chunky start",
+            "chunky confirm"
         )
-        for (c in commands) run(c)
+        for (c in commands) {
+            val out = run(c)
+            GrandStrategy.LOGGER.info("{} -> {}", c, out.joinToString(" | ").take(300))
+        }
         chunkyIdle = 0
     }
 
@@ -244,10 +251,23 @@ class WorldSetup(private val rt: Runtime) {
 
     private fun finish(engine: String) {
         settings.pregen = PREGEN_DONE
+        rebuilding = false
         bar.removeAllPlayers()
         rt.server.playerList.broadcastSystemMessage(Texts.prefix().append(Texts.plain("지형 미리 생성 완료 ($engine)", ChatFormatting.GREEN)), false)
         rt.save()
     }
+
+    fun rebuildMap(): Outcome {
+        if (settings.worldSize <= 0) return Outcome.fail("세계 크기를 먼저 정한다 (/gs setup).")
+        settings.pregen = PREGEN_BUILTIN
+        settings.pregenIndex = 0
+        startedAt = System.nanoTime()
+        startedIndex = 0
+        rebuilding = true
+        return Outcome.ok("경계 안의 청크를 차례로 불러 지도를 다시 그린다.")
+    }
+
+    private var rebuilding = false
 
     fun cancel(): Outcome {
         if (settings.pregen == PREGEN_CHUNKY) run("chunky cancel")

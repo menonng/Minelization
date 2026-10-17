@@ -126,6 +126,7 @@ object GsCommands {
                 if (!rt().menus.openFor(player)) NationScreen(player, rt()).open()
                 1
             }
+            .then(literal("map").executes { ctx -> rt().map.open(ctx.source.playerOrException); 1 })
             .then(literal("chest").executes { ctx -> NationScreen(ctx.source.playerOrException, rt()).open(); 1 })
             .then(literal("menu").then(argument("page", StringArgumentType.word())
                 .suggests { _, b -> SharedSuggestionProvider.suggest(listOf("overview", "map", "diplomacy", "research", "log"), b) }
@@ -297,6 +298,7 @@ object GsCommands {
                 ChatFormatting.WHITE)))
         })
         .then(literal("save").executes { ctx -> rt().save(); reply(ctx, Outcome.ok("저장했다.")) })
+        .then(literal("map").then(literal("rebuild").executes { ctx -> reply(ctx, rt().setup.rebuildMap()) }))
         .then(literal("pregen")
             .then(literal("cancel").executes { ctx -> reply(ctx, rt().setup.cancel()) })
             .then(literal("status").executes { ctx -> reply(ctx, Outcome.ok("미리 생성 상태 ${rt().settings.pregen} · ${"%.1f".format(rt().setup.progress() * 100)}% (${rt().settings.pregenIndex}청크)")) }))

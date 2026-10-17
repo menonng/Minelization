@@ -131,3 +131,40 @@ data class SetupOffer(val tiers: List<SetupTier>, val current: Int, val chunky: 
 @Serializable
 @SerialName("setup_done")
 data class SetupDone(val size: Int) : ToClient()
+
+@Serializable
+data class MapTileData(val key: Long, val version: Int, val pixels: String?, val owners: List<Int>, val flags: List<Int>)
+
+@Serializable
+data class MapNation(val id: Int, val name: String, val color: Int, val dye: Int, val capital: Long, val claims: Int)
+
+@Serializable
+data class MapTown(val id: Int, val name: String, val center: Long, val owner: Int)
+
+@Serializable
+data class MapPlayer(val name: String, val x: Double, val z: Double, val yaw: Float, val nation: Int, val self: Boolean)
+
+@Serializable
+@SerialName("map_open")
+data class MapOpen(val open: Boolean) : ToServer()
+
+@Serializable
+@SerialName("map_request")
+data class MapRequest(val keys: List<Long>, val versions: List<Int>) : ToServer()
+
+@Serializable
+@SerialName("map_tiles")
+data class MapTiles(val tiles: List<MapTileData>) : ToClient()
+
+@Serializable
+@SerialName("map_info")
+data class MapInfo(
+    val open: Boolean,
+    val borderX: Double,
+    val borderZ: Double,
+    val borderSize: Double,
+    val nations: List<MapNation>,
+    val towns: List<MapTown>,
+    val players: List<MapPlayer>,
+    val colored: Long
+) : ToClient()

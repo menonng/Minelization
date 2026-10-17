@@ -19,6 +19,7 @@ object GrandStrategyClient : ClientModInitializer {
     override fun onInitializeClient() {
         WorkMode.init()
         com.grandstrategy.client.ui.NationMenu.init()
+        com.grandstrategy.client.ui.WorldMap.init()
         ClientPlayNetworking.registerGlobalReceiver(PlayCutscenePayload.TYPE) { payload, _ ->
             CutscenePlayer.start(CutsceneSpec.decode(payload.json))
         }
@@ -30,16 +31,22 @@ object GrandStrategyClient : ClientModInitializer {
             if (!CutscenePlayer.active) {
                 WorkMode.tick(mc)
                 com.grandstrategy.client.ui.NationMenu.tick(mc)
+                com.grandstrategy.client.ui.WorldMap.tick(mc)
             }
             if (capture && mc.level != null && !CutscenePlayer.active && ++ticks % 200 == 0) {
                 Screenshot.grab(mc.gameDirectory, "view_%03d.png".format(shots++), mc.gameRenderer.mainRenderTarget(), 1) { }
             }
         }
-        ClientPlayConnectionEvents.DISCONNECT.register { _, _ -> CutscenePlayer.stop(false) }
+        ClientPlayConnectionEvents.DISCONNECT.register { _, _ ->
+            CutscenePlayer.stop(false)
+            com.grandstrategy.client.ui.WorldMap.clear()
+        }
         ClientPlayNetworking.registerGlobalReceiver(ServerMessagePayload.TYPE) { payload, _ ->
             val message = runCatching { WorkJson.json.decodeFromString(ToClient.serializer(), payload.json) }.getOrNull()
             when (message) {
                 is com.grandstrategy.net.MenuView -> com.grandstrategy.client.ui.NationMenu.onView(message)
+                is com.grandstrategy.net.MapInfo -> com.grandstrategy.client.ui.WorldMap.onInfo(message)
+                is com.grandstrategy.net.MapTiles -> com.grandstrategy.client.ui.WorldMap.onTiles(message)
                 is com.grandstrategy.net.SetupDone -> net.minecraft.client.Minecraft.getInstance().let { mc -> if (mc.gui.screen() is com.grandstrategy.client.ui.SetupScreen) mc.gui.setScreen(null) }
                 is com.grandstrategy.net.SetupOffer -> net.minecraft.client.Minecraft.getInstance().gui.setScreen(com.grandstrategy.client.ui.SetupScreen(message))
                 is ToClient.Result -> {

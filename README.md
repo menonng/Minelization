@@ -60,6 +60,7 @@
 | `/gs setup [크기] [미리생성] [조물주]` · `/gs admin pregen status|cancel` | 세계 준비 (OP) |
 | `/gs mode spectator|adventure` | 조물주 모드에서 관전/모험 전환 |
 | `/gs menu <탭>` · `/gs chest` | 나라 메뉴 탭 바로 열기 / 상자 메뉴 |
+| `/gs map` · `/gs admin map rebuild` | 전체 화면 세계 지도 (`M` 키) / 지도 타일 처음부터 다시 그리기 (OP) |
 | `/gs admin speed <틱>` · `pause` · `resume` · `step [턴]` · `seed <수>` · `perf` · `save` · `reload` | 관리 (OP) |
 
 ## 밸런스 실시간 조정
@@ -83,6 +84,10 @@
 | `/gs admin agents vanilla <수>` · `clearvanilla` | 비교용 바닐라 주민 소환 / 제거 |
 
 `balance.json`의 `agents` 항목: `perPopulation`(인구 1당 개체), `max`(전체 상한), `spawnPerTurn`, `visibleRadius`, `maxVisiblePerPlayer`.
+
+## 세계 지도
+
+`M` (또는 `/gs map`). 서버가 미리 생성된 범위를 바닐라 지도 색과 높이 음영으로 그려 타일로 보내고, 클라이언트가 그 위에 나라 영토·국경·이름, 수도·도시, 플레이어를 겹쳐 그린다. 끌어서 이동, 휠로 확대·축소. 자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.8.
 
 ## 작업 지정 모드 (건축·철거)
 
