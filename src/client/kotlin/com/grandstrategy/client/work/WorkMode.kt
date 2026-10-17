@@ -247,42 +247,88 @@ object WorkMode {
         line(x0, y0, z0, x0, y1, z0); line(x1, y0, z0, x1, y1, z0); line(x0, y0, z1, x0, y1, z1); line(x1, y0, z1, x1, y1, z1)
     }
 
+    private fun toolIcon(t: WorkTool): net.minecraft.world.item.Item = when (t) {
+        WorkTool.SELECT -> net.minecraft.world.item.Items.SPYGLASS
+        WorkTool.BUILD -> net.minecraft.world.item.Items.BRICKS
+        WorkTool.WALLS -> net.minecraft.world.item.Items.STONE_BRICK_WALL
+        WorkTool.DEMOLISH -> net.minecraft.world.item.Items.TNT
+        WorkTool.FLATTEN -> net.minecraft.world.item.Items.IRON_SHOVEL
+    }
+
     fun hud(g: GuiGraphicsExtractor) {
         if (!active) return
         val font = Minecraft.getInstance().font
-        val lines = ArrayList<Pair<String, Int>>()
         val i = info
-        lines += "작업 지정 모드  [B] 끄기" to 0xFFE040
-        lines += "도구: ${tool.label}  [C]" to 0xFFFFFF
+        val x = 6
+        val w = 236
+        val inner = x + 10
+        val orders = i?.orders?.take(5) ?: emptyList()
+        val box = dragStart?.let { a -> dragEnd?.let { b -> Box.of(a.x, a.y, a.z, b.x, b.y, b.z) } } ?: selection
+        val showToast = lastMessage.isNotEmpty() && ticks - lastMessageAt < 100
+        var h = 24 + 26 + (if (tool == WorkTool.BUILD) 28 else 0) + 22 + 20 + 14 + 12
+        if (orders.isNotEmpty()) h += 12 + orders.size * 20
+        if (showToast) h += 14
+        val top = 6
+        com.grandstrategy.client.ui.Ui.panel(g, x, top, w, h)
+        val header = Component.literal("작업 지정 · ${i?.nation?.ifEmpty { "소속 없음" } ?: "…"}")
+        com.grandstrategy.client.ui.Ui.ribbon(g, font, x + 6, top + 6, w - 12, i?.color ?: 0x8A8A8A, header, net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.WRITABLE_BOOK))
+        var y = top + 28
+        WorkTool.entries.forEachIndexed { k, t -> com.grandstrategy.client.ui.Ui.slot(g, inner + k * 21, y, toolIcon(t), t == tool) }
+        g.text(font, Component.literal(tool.label), inner + 5 * 21 + 6, y + 2, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.GOLD), true)
+        g.text(font, Component.literal("[C] 바꾸기  [B] 끄기"), inner + 5 * 21 + 6, y + 11, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
+        y += 26
         if (tool == WorkTool.BUILD) {
             val t = currentTemplate()
-            lines += (t?.let { "건물: ${it.kind.label} · ${it.name} (${it.sizeX}×${it.sizeZ}) [Z/X]" } ?: "건물 목록 받는 중") to 0xDDDDDD
-            lines += "회전: ${rotation * 90}°  [R]" to 0xDDDDDD
+            com.grandstrategy.client.ui.Ui.slot(g, inner, y, com.grandstrategy.client.ui.Ui.kindIcon(t?.kind), false)
+            g.text(font, Component.literal(t?.let { "${it.kind.label} · ${it.name}" } ?: "건물 목록 받는 중"), inner + 24, y + 1, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.TEXT), true)
+            g.text(font, Component.literal(t?.let { "${it.sizeX}×${it.sizeY}×${it.sizeZ} · 회전 ${rotation * 90}°  [Z/X] [R]" } ?: ""), inner + 24, y + 11, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
+            y += 28
         }
-        lines += "징용: ${if (conscript) "켬 (일반 국민도 동원)" else "끔 (건축가만)"}  [V]" to (if (conscript) 0xFF9A1E else 0xAAAAAA)
+        com.grandstrategy.client.ui.Ui.slot(g, inner, y, net.minecraft.world.item.Items.BELL, conscript)
+        g.text(font, Component.literal(if (conscript) "징용 켬 · 일반 국민도 동원" else "징용 끔 · 건축가만"), inner + 24, y + 1,
+            com.grandstrategy.client.ui.Ui.argb(if (conscript) 0xFF9A1E else com.grandstrategy.client.ui.Ui.TEXT), true)
+        g.text(font, Component.literal("[V]  건축가 ${i?.builders ?: 0} · 쉬는 국민 ${i?.idle ?: 0}"), inner + 24, y + 11, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
+        y += 22
         if (i != null) {
-            lines += "${i.nation.ifEmpty { "소속 없음" }} · 건축가 ${i.builders} · 놀고 있는 국민 ${i.idle}" to i.color
-            lines += i.stock.entries.joinToString(" ") { "${it.key} ${it.value}" } to 0xAAAAAA
-        }
-        val box = dragStart?.let { a -> dragEnd?.let { b -> Box.of(a.x, a.y, a.z, b.x, b.y, b.z) } } ?: selection
-        if (box != null && tool != WorkTool.SELECT) {
-            val p = problem(box)
-            lines += "영역 ${box.sizeX}×${box.sizeY}×${box.sizeZ} · ${p ?: "가능 — Enter 또는 우클릭으로 지시"}" to (if (p == null) 0x3CFF5A else 0xFF5050)
-        } else if (tool == WorkTool.SELECT) {
-            lines += "건물을 클릭하면 외곽 블록으로 감싼 상자를 하나의 건물로 인식한다" to 0xAAAAAA
-        } else {
-            lines += "좌클릭 드래그로 영역 지정" to 0xAAAAAA
-        }
-        if (i != null && i.orders.isNotEmpty()) {
-            lines += "진행 중인 작업" to 0xFFFFFF
-            for (o in i.orders.take(6)) {
-                val pct = if (o.total > 0) (o.progress * 100 / o.total).toInt() else 0
-                lines += " #${o.id} ${o.type.label}${o.kind?.let { " " + it.label } ?: ""} $pct% · 인부 ${o.present}/${o.crew}" to 0xFF9A1E
+            var rx = inner
+            for ((label, value) in i.stock) {
+                g.item(net.minecraft.world.item.ItemStack(com.grandstrategy.client.ui.Ui.resourceIcon(label)), rx, y)
+                g.text(font, Component.literal(value.toString()), rx + 17, y + 5, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.TEXT), true)
+                rx += 17 + font.width(value.toString()) + 8
             }
         }
-        if (lastMessage.isNotEmpty() && ticks - lastMessageAt < 100) lines += lastMessage to (if (lastMessageOk) 0x3CFF5A else 0xFF5050)
-        val width = lines.maxOf { font.width(it.first) } + 8
-        g.fill(4, 4, 4 + width, 8 + lines.size * 11, 0xA0000000.toInt())
-        lines.forEachIndexed { k, (text, color) -> g.text(font, Component.literal(text), 8, 8 + k * 11, 0xFF000000.toInt() or color, true) }
+        y += 20
+        val (statusText, statusColor) = when {
+            tool == WorkTool.SELECT -> "건물을 클릭하면 외곽을 감싼 상자로 인식" to com.grandstrategy.client.ui.Ui.MUTED
+            box == null -> "좌클릭으로 끌어서 영역 지정" to com.grandstrategy.client.ui.Ui.MUTED
+            else -> {
+                val p = problem(box)
+                "${box.sizeX}×${box.sizeY}×${box.sizeZ} · ${p ?: "가능 — Enter/우클릭으로 지시"}" to (if (p == null) 0x5AE66E else 0xFF6A5A)
+            }
+        }
+        g.fill(inner - 2, y - 2, x + w - 8, y + 10, com.grandstrategy.client.ui.Ui.argb(0x000000, 90))
+        g.text(font, Component.literal(statusText), inner, y, com.grandstrategy.client.ui.Ui.argb(statusColor), true)
+        y += 14
+        if (orders.isNotEmpty()) {
+            g.text(font, Component.literal("진행 중인 작업"), inner, y, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.GOLD), true)
+            y += 12
+            for (o in orders) {
+                val icon = when (o.type) {
+                    com.grandstrategy.sim.WorkType.BUILD -> com.grandstrategy.client.ui.Ui.kindIcon(o.kind)
+                    com.grandstrategy.sim.WorkType.DEMOLISH -> net.minecraft.world.item.Items.TNT
+                    com.grandstrategy.sim.WorkType.FLATTEN -> net.minecraft.world.item.Items.IRON_SHOVEL
+                }
+                g.item(net.minecraft.world.item.ItemStack(icon), inner, y)
+                val fraction = if (o.total > 0) o.progress.toDouble() / o.total else 0.0
+                g.text(font, Component.literal("#${o.id} ${o.type.label}${o.kind?.let { " " + it.label } ?: ""}"), inner + 20, y, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.TEXT), true)
+                val people = "인부 ${o.present}/${o.crew}"
+                g.text(font, Component.literal(people), x + w - 12 - font.width(people), y, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
+                com.grandstrategy.client.ui.Ui.bar(g, inner + 20, y + 10, w - 46, fraction, if (o.type == com.grandstrategy.sim.WorkType.BUILD) 0x5AC85A else 0xE09A3C)
+                y += 20
+            }
+        }
+        if (showToast) {
+            g.text(font, Component.literal(lastMessage), inner, y + 2, com.grandstrategy.client.ui.Ui.argb(if (lastMessageOk) 0x5AE66E else 0xFF6A5A), true)
+        }
     }
 }
