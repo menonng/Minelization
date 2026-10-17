@@ -17,7 +17,6 @@ import net.minecraft.client.KeyMapping
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.core.BlockPos
-import net.minecraft.core.particles.DustParticleOptions
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
 import net.minecraft.world.level.ClipContext
@@ -36,7 +35,9 @@ object WorkMode {
     private val confirmKey = KeyMappingHelper.registerKeyMapping(KeyMapping("key.grandstrategy.confirm", InputConstants.KEY_RETURN, category))
     private val clearKey = KeyMappingHelper.registerKeyMapping(KeyMapping("key.grandstrategy.clear", InputConstants.KEY_BACKSPACE, category))
 
-    fun init() {}
+    fun init() {
+        net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.BEFORE_GIZMOS.register { gizmos() }
+    }
 
     var active = false
         private set
@@ -44,6 +45,7 @@ object WorkMode {
         private set
     private var templateIndex = 0
     private var rotation = 0
+    private var roadRemove = false
     private var conscript = false
     private var dragStart: BlockPos? = null
     private var dragEnd: BlockPos? = null
@@ -107,7 +109,9 @@ object WorkMode {
         }
         while (nextKey.consumeClick()) if (templates.isNotEmpty()) templateIndex = (templateIndex + 1) % templates.size
         while (prevKey.consumeClick()) if (templates.isNotEmpty()) templateIndex = (templateIndex - 1 + templates.size) % templates.size
-        while (rotateKey.consumeClick()) rotation = (rotation + 1) % 4
+        while (rotateKey.consumeClick()) {
+            if (tool == WorkTool.ROAD) roadRemove = !roadRemove else rotation = (rotation + 1) % 4
+        }
         while (conscriptKey.consumeClick()) conscript = !conscript
         while (clearKey.consumeClick()) selection = null
         hover = raycast(mc)
@@ -135,7 +139,6 @@ object WorkMode {
         val confirm = (use && !useWasDown) || confirmKey.consumeClick()
         useWasDown = use
         if (confirm) confirmSelection()
-        if (ticks % 5 == 0L) drawOutlines(mc)
     }
 
     private fun setActive(on: Boolean) {
@@ -160,7 +163,7 @@ object WorkMode {
             return
         }
         val area = Box(box.minX, box.minY, box.minZ, box.maxX, if (tool == WorkTool.DEMOLISH) box.maxY + 12 else box.maxY, box.maxZ)
-        send(ToServer.Order(tool, area, templateIndex, rotation, conscript))
+        send(ToServer.Order(tool, area, templateIndex, rotation, conscript, remove = tool == WorkTool.ROAD && roadRemove))
     }
 
     private fun raycast(mc: Minecraft): BlockPos? {
@@ -195,57 +198,70 @@ object WorkMode {
         for (c in target.chunks()) if (c !in own) return "영토 밖 ${Chunks.format(c)}"
         if (tool == WorkTool.BUILD || tool == WorkTool.WALLS || tool == WorkTool.FLATTEN) {
             val hit = i.buildings.firstOrNull { b ->
-                b.box.minX <= target.maxX + 1 && b.box.maxX >= target.minX - 1 && b.box.minZ <= target.maxZ + 1 && b.box.maxZ >= target.minZ - 1
+                val o = b.box
+                val touch = o.minX <= target.maxX + 1 && o.maxX >= target.minX - 1 && o.minZ <= target.maxZ + 1 && o.maxZ >= target.minZ - 1
+                // Inside a ring of walls is free land; only the wall line itself is in the way.
+                touch && !(b.kind == BuildingKind.WALLS && target.minX - 1 > o.minX && target.maxX + 1 < o.maxX && target.minZ - 1 > o.minZ && target.maxZ + 1 < o.maxZ)
             }
             if (hit != null) return "${hit.kind.label} #${hit.id}와 겹침"
+        }
+        if (tool == WorkTool.BUILD) {
+            val planned = i.roads.toHashSet()
+            val level = Minecraft.getInstance().level ?: return null
+            val near = com.grandstrategy.sim.RoadLots.near(target, com.grandstrategy.sim.RoadLots.REACH) { x, z ->
+                Chunks.pack(x, z) in planned || roadAt(level, x, z)
+            }
+            if (!near) return "길 옆이 아니다 (${com.grandstrategy.sim.RoadLots.REACH}칸 안에 길이 있어야 함)"
         }
         return null
     }
 
-    private fun drawOutlines(mc: Minecraft) {
-        val level = mc.level ?: return
+    private fun roadAt(level: net.minecraft.client.multiplayer.ClientLevel, x: Int, z: Int): Boolean {
+        val top = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1
+        return com.grandstrategy.mc.build.RoadBlocks.road(level.getBlockState(BlockPos(x, top, z))) ||
+            com.grandstrategy.mc.build.RoadBlocks.road(level.getBlockState(BlockPos(x, top - 1, z)))
+    }
+
+    /**
+     * Outlines drawn as thick gizmo lines every frame (not particles): the drag selection glows green or red through
+     * terrain, buildings and work sites get bold colored frames with a faint fill so they read at a glance.
+     */
+    private fun gizmos() {
+        if (!active) return
+        val mc = Minecraft.getInstance()
         val player = mc.player ?: return
         val live = dragStart?.let { a -> dragEnd?.let { b -> Box.of(a.x, a.y, a.z, b.x, b.y, b.z) } }
         val box = live ?: selection
         if (box != null) {
             val ok = problem(box) == null
-            outline(level, box, if (ok) 0x3CFF5A else 0xFF3C3C, 1.4f)
-            if (tool == WorkTool.BUILD) footprint(box)?.let { outline(level, it, 0xFFFFFF, 1.0f) }
+            val color = if (ok) 0x3CFF5A else 0xFF3C3C
+            cuboid(box, color, 5f, 56, onTop = true)
+            if (tool == WorkTool.BUILD) footprint(box)?.let { cuboid(it, 0xFFFFFF, 3f, 24, onTop = true) }
         }
         val i = info ?: return
         for (b in i.buildings) {
-            if (Vec3(b.box.centerX, b.box.minY.toDouble(), b.box.centerZ).distanceTo(player.position()) > 72) continue
+            if (Vec3(b.box.centerX, b.box.minY.toDouble(), b.box.centerZ).distanceTo(player.position()) > 96) continue
+            val selectedNow = selected?.id == b.id
             val color = when {
-                selected?.id == b.id -> 0xFFE040
+                selectedNow -> 0xFFE040
                 !b.complete -> 0xFF9A1E
                 b.own -> 0x3CC8FF
-                else -> 0xC8C8C8
+                else -> 0xD0D0D0
             }
-            outline(level, b.box, color, 0.9f)
+            cuboid(b.box, color, if (selectedNow) 5f else 3f, if (selectedNow) 48 else 22, onTop = selectedNow)
         }
         for (o in i.orders) {
-            if (o.type == com.grandstrategy.sim.WorkType.BUILD) continue
-            outline(level, o.box, 0xFF9A1E, 1.0f)
+            if (o.type == com.grandstrategy.sim.WorkType.BUILD || o.type == com.grandstrategy.sim.WorkType.ROAD) continue
+            cuboid(o.box, if (o.type == com.grandstrategy.sim.WorkType.DEMOLISH) 0xFF5A3C else 0xFF9A1E, 4f, 40, onTop = false)
         }
-        hover?.let { h -> outline(level, Box(h.x, h.y, h.z, h.x, h.y, h.z), 0xFFFFFF, 0.6f) }
+        hover?.let { h -> cuboid(Box(h.x, h.y, h.z, h.x, h.y, h.z), 0xFFFFFF, 3f, 40, onTop = false) }
     }
 
-    private fun outline(level: net.minecraft.client.multiplayer.ClientLevel, box: Box, color: Int, size: Float) {
-        val dust = DustParticleOptions(color, size)
-        val x0 = box.minX.toDouble(); val x1 = box.maxX + 1.0
-        val y0 = box.minY.toDouble(); val y1 = box.maxY + 1.0
-        val z0 = box.minZ.toDouble(); val z1 = box.maxZ + 1.0
-        fun line(ax: Double, ay: Double, az: Double, bx: Double, by: Double, bz: Double) {
-            val len = maxOf(kotlin.math.abs(bx - ax), kotlin.math.abs(by - ay), kotlin.math.abs(bz - az))
-            val steps = maxOf(1, (len / 0.8).toInt())
-            for (k in 0..steps) {
-                val t = k.toDouble() / steps
-                level.addAlwaysVisibleParticle(dust, true, ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t, 0.0, 0.0, 0.0)
-            }
-        }
-        line(x0, y0, z0, x1, y0, z0); line(x0, y0, z1, x1, y0, z1); line(x0, y0, z0, x0, y0, z1); line(x1, y0, z0, x1, y0, z1)
-        line(x0, y1, z0, x1, y1, z0); line(x0, y1, z1, x1, y1, z1); line(x0, y1, z0, x0, y1, z1); line(x1, y1, z0, x1, y1, z1)
-        line(x0, y0, z0, x0, y1, z0); line(x1, y0, z0, x1, y1, z0); line(x0, y0, z1, x0, y1, z1); line(x1, y0, z1, x1, y1, z1)
+    private fun cuboid(box: Box, rgb: Int, width: Float, fillAlpha: Int, onTop: Boolean) {
+        val aabb = net.minecraft.world.phys.AABB(box.minX.toDouble(), box.minY.toDouble(), box.minZ.toDouble(), box.maxX + 1.0, box.maxY + 1.0, box.maxZ + 1.0).inflate(0.02)
+        val style = net.minecraft.gizmos.GizmoStyle.strokeAndFill(0xFF000000.toInt() or rgb, width, (fillAlpha shl 24) or rgb)
+        val props = net.minecraft.gizmos.Gizmos.cuboid(aabb, style)
+        if (onTop) props.setAlwaysOnTop()
     }
 
     private fun toolIcon(t: WorkTool): net.minecraft.world.item.Item = when (t) {
@@ -254,6 +270,7 @@ object WorkMode {
         WorkTool.WALLS -> net.minecraft.world.item.Items.STONE_BRICK_WALL
         WorkTool.DEMOLISH -> net.minecraft.world.item.Items.TNT
         WorkTool.FLATTEN -> net.minecraft.world.item.Items.IRON_SHOVEL
+        WorkTool.ROAD -> net.minecraft.world.item.Items.DIRT_PATH
     }
 
     fun hud(g: GuiGraphicsExtractor) {
@@ -266,7 +283,7 @@ object WorkMode {
         val orders = i?.orders?.take(5) ?: emptyList()
         val box = dragStart?.let { a -> dragEnd?.let { b -> Box.of(a.x, a.y, a.z, b.x, b.y, b.z) } } ?: selection
         val showToast = lastMessage.isNotEmpty() && ticks - lastMessageAt < 100
-        var h = 24 + 26 + (if (tool == WorkTool.BUILD) 28 else 0) + 22 + 20 + 14 + 12
+        var h = 24 + 26 + (if (tool == WorkTool.BUILD || tool == WorkTool.ROAD) 28 else 0) + 22 + 20 + 14 + 12
         if (orders.isNotEmpty()) h += 12 + orders.size * 20
         if (showToast) h += 14
         val bosses = runCatching {
@@ -278,14 +295,22 @@ object WorkMode {
         com.grandstrategy.client.ui.Ui.ribbon(g, font, x + 6, top + 6, w - 12, i?.color ?: 0x8A8A8A, header, net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.WRITABLE_BOOK))
         var y = top + 28
         WorkTool.entries.forEachIndexed { k, t -> com.grandstrategy.client.ui.Ui.slot(g, inner + k * 21, y, toolIcon(t), t == tool) }
-        g.text(font, Component.literal(tool.label), inner + 5 * 21 + 6, y + 2, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.GOLD), true)
-        g.text(font, Component.literal("[C] 바꾸기  [B] 끄기"), inner + 5 * 21 + 6, y + 11, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
+        val labelX = inner + WorkTool.entries.size * 21 + 4
+        g.text(font, Component.literal(tool.label), labelX, y + 2, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.GOLD), true)
+        g.text(font, Component.literal("[C] [B] 끄기"), labelX, y + 11, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
         y += 26
         if (tool == WorkTool.BUILD) {
             val t = currentTemplate()
             com.grandstrategy.client.ui.Ui.slot(g, inner, y, com.grandstrategy.client.ui.Ui.kindIcon(t?.kind), false)
             g.text(font, Component.literal(t?.let { "${it.kind.label} · ${it.name}" } ?: "건물 목록 받는 중"), inner + 24, y + 1, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.TEXT), true)
             g.text(font, Component.literal(t?.let { "${it.sizeX}×${it.sizeY}×${it.sizeZ} · 회전 ${rotation * 90}°  [Z/X] [R]" } ?: ""), inner + 24, y + 11, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
+            y += 28
+        }
+        if (tool == WorkTool.ROAD) {
+            com.grandstrategy.client.ui.Ui.slot(g, inner, y, if (roadRemove) net.minecraft.world.item.Items.GRASS_BLOCK else net.minecraft.world.item.Items.DIRT_PATH, roadRemove)
+            g.text(font, Component.literal(if (roadRemove) "길 걷어내기 · 다시 자동으로 깔지 않음" else "길 놓기 · 끌어서 지정한 칸을 포장"), inner + 24, y + 1,
+                com.grandstrategy.client.ui.Ui.argb(if (roadRemove) 0xFF9A1E else com.grandstrategy.client.ui.Ui.TEXT), true)
+            g.text(font, Component.literal("[R] 놓기/걷기 · 마을 길은 저절로 생긴다"), inner + 24, y + 11, com.grandstrategy.client.ui.Ui.argb(com.grandstrategy.client.ui.Ui.MUTED), false)
             y += 28
         }
         com.grandstrategy.client.ui.Ui.slot(g, inner, y, net.minecraft.world.item.Items.BELL, conscript)
@@ -321,6 +346,8 @@ object WorkMode {
                     com.grandstrategy.sim.WorkType.BUILD -> com.grandstrategy.client.ui.Ui.kindIcon(o.kind)
                     com.grandstrategy.sim.WorkType.DEMOLISH -> net.minecraft.world.item.Items.TNT
                     com.grandstrategy.sim.WorkType.FLATTEN -> net.minecraft.world.item.Items.IRON_SHOVEL
+                    com.grandstrategy.sim.WorkType.ROAD -> net.minecraft.world.item.Items.DIRT_PATH
+                    com.grandstrategy.sim.WorkType.UNROAD -> net.minecraft.world.item.Items.GRASS_BLOCK
                 }
                 g.item(net.minecraft.world.item.ItemStack(icon), inner, y)
                 val fraction = if (o.total > 0) o.progress.toDouble() / o.total else 0.0

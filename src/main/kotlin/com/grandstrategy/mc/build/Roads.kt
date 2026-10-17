@@ -1,0 +1,548 @@
+package com.grandstrategy.mc.build
+
+import com.grandstrategy.mc.Runtime
+import com.grandstrategy.sim.Balance
+import com.grandstrategy.sim.Box
+import com.grandstrategy.sim.Building
+import com.grandstrategy.sim.BuildingKind
+import com.grandstrategy.sim.Chunks
+import com.grandstrategy.sim.Nation
+import com.grandstrategy.sim.Outcome
+import com.grandstrategy.sim.Road
+import com.grandstrategy.sim.RoadGround
+import com.grandstrategy.sim.RoadKind
+import com.grandstrategy.sim.RoadNetwork
+import com.grandstrategy.sim.RoadPathfinder
+import com.grandstrategy.sim.RoadLots
+import com.grandstrategy.sim.TechBranch
+import com.grandstrategy.sim.Terrain
+import com.grandstrategy.sim.WorkOrder
+import com.grandstrategy.sim.WorkType
+import net.minecraft.core.BlockPos
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.tags.BlockTags
+import net.minecraft.tags.FluidTags
+import net.minecraft.world.level.block.Blocks
+import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.level.levelgen.Heightmap
+
+/**
+ * Reads the live world for road planning. Land nobody has loaded is guessed from the chunk's terrain class (flat,
+ * passable unless it is water or mountain), so AI towns far from any player still lay out streets; the blocks are
+ * fitted to the real ground when builders pave them after the chunk loads.
+ */
+class WorldRoadGround(private val level: ServerLevel, private val terrain: (Long) -> Terrain) : RoadGround {
+    private val heights = HashMap<Long, Int>()
+    private val costs = HashMap<Long, Double>()
+
+    private fun loaded(x: Int, z: Int) = level.chunkSource.hasChunk(x shr 4, z shr 4)
+
+    override fun exact(x: Int, z: Int): Boolean = loaded(x, z)
+
+    override fun height(x: Int, z: Int): Int? {
+        val key = Chunks.pack(x, z)
+        heights[key]?.let { return if (it == Int.MIN_VALUE) null else it }
+        val h = when {
+            loaded(x, z) -> RoadBlocks.groundY(level, x, z)
+            terrain(Chunks.pack(x shr 4, z shr 4)).let { it == Terrain.WATER || it == Terrain.MOUNTAIN } -> Int.MIN_VALUE
+            else -> level.seaLevel
+        }
+        heights[key] = h
+        return if (h == Int.MIN_VALUE) null else h
+    }
+
+    override fun cost(x: Int, z: Int): Double = costs.getOrPut(Chunks.pack(x, z)) {
+        val y = height(x, z) ?: return@getOrPut Double.POSITIVE_INFINITY
+        if (!loaded(x, z)) return@getOrPut 0.5
+        val surface = level.getBlockState(BlockPos(x, y, z))
+        val above = level.getBlockState(BlockPos(x, y + 1, z))
+        when {
+            surface.fluidState.`is`(FluidTags.LAVA) -> Double.POSITIVE_INFINITY
+            !surface.fluidState.isEmpty -> 6.0
+            surface.`is`(Blocks.DIRT_PATH) || RoadBlocks.paving(surface) -> -1.0
+            surface.`is`(Blocks.FARMLAND) || above.`is`(BlockTags.CROPS) -> 10.0
+            surface.`is`(BlockTags.LOGS) || above.`is`(BlockTags.LOGS) -> Double.POSITIVE_INFINITY
+            !BlockClass.terrain(surface) && !BlockClass.vegetation(surface) -> Double.POSITIVE_INFINITY
+            above.`is`(BlockTags.LEAVES) || surface.`is`(BlockTags.LEAVES) -> 3.0
+            surface.`is`(BlockTags.SAND) || surface.`is`(Blocks.GRAVEL) -> 0.3
+            else -> 0.0
+        }
+    }
+}
+
+/** Paving by era. Index = construction tier from [RoadTuning.tierLevels][com.grandstrategy.sim.RoadTuning.tierLevels]. */
+object RoadBlocks {
+    private val PAVING = setOf(
+        Blocks.COBBLESTONE, Blocks.MOSSY_COBBLESTONE, Blocks.STONE_BRICKS, Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS,
+        Blocks.POLISHED_ANDESITE, Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.GRAY), Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.LIGHT_GRAY), Blocks.COARSE_DIRT
+    )
+    private val BRIDGES = setOf(Blocks.OAK_PLANKS, Blocks.SPRUCE_PLANKS, Blocks.STONE_BRICKS, Blocks.SMOOTH_STONE)
+
+    fun paving(state: BlockState): Boolean = PAVING.any { state.`is`(it) }
+
+    /** Top block a road would replace: the motion-blocking surface, looking under snow layers. */
+    fun groundY(level: ServerLevel, x: Int, z: Int): Int {
+        var y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1
+        val pos = BlockPos.MutableBlockPos(x, y, z)
+        while (y > level.minY && level.getBlockState(pos.setY(y)).`is`(Blocks.SNOW)) y--
+        return y
+    }
+
+    fun bridge(state: BlockState): Boolean = BRIDGES.any { state.`is`(it) }
+
+    /** Anything our roads (or vanilla village paths) are made of; villagers walk these more willingly. */
+    fun road(state: BlockState): Boolean = state.`is`(Blocks.DIRT_PATH) || paving(state)
+
+    fun tier(nation: Nation?): Int {
+        val level = nation?.level(TechBranch.CONSTRUCTION) ?: 0
+        return Balance.config.roads.tierLevels.count { level >= it }
+    }
+
+    /** Surface block for a column, varied by position so long roads look worn rather than printed. */
+    fun surface(tier: Int, kind: RoadKind, x: Int, z: Int): BlockState {
+        val r = ((x * 73856093) xor (z * 19349663)).let { (it xor (it ushr 13)) and 0xFF }
+        return when (tier) {
+            0 -> if (kind == RoadKind.PLAZA && r < 70) Blocks.COARSE_DIRT else Blocks.DIRT_PATH
+            1 -> when {
+                r < 150 -> Blocks.COBBLESTONE
+                r < 200 -> Blocks.MOSSY_COBBLESTONE
+                else -> Blocks.DIRT_PATH
+            }
+            2 -> when {
+                kind == RoadKind.PLAZA -> if (r < 200) Blocks.POLISHED_ANDESITE else Blocks.STONE_BRICKS
+                r < 190 -> Blocks.STONE_BRICKS
+                r < 225 -> Blocks.CRACKED_STONE_BRICKS
+                else -> Blocks.MOSSY_STONE_BRICKS
+            }
+            else -> if (kind == RoadKind.PLAZA) Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.LIGHT_GRAY) else Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.GRAY)
+        }.defaultBlockState()
+    }
+
+    fun bridge(tier: Int): BlockState = when (tier) {
+        0 -> Blocks.OAK_PLANKS
+        1 -> Blocks.SPRUCE_PLANKS
+        2 -> Blocks.STONE_BRICKS
+        else -> Blocks.SMOOTH_STONE
+    }.defaultBlockState()
+}
+
+/**
+ * Lays out streets on its own, WorldBox style: first a small plaza at the capital, then a street from every finished
+ * building's door to the nearest road, then highways from the nation's towns. Each plan becomes an ordinary ROAD work
+ * order, so builders walk out and pave it block by block, the same way a player's order is carried out.
+ * Players can lay roads themselves and tear any road up; torn-up columns are never paved automatically again.
+ */
+class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
+    val network = RoadNetwork(rt.state)
+    private val retryAt = HashMap<String, Long>()
+    private val failures = HashMap<String, Int>()
+    /** Why the last planning attempt for a nation ended, for `/gs work roads`. */
+    private val lastReason = HashMap<Int, String>()
+    /** Nations whose builders found no free lot on the streets; the next plan opens a new street for them. */
+    private val frontage = HashSet<Int>()
+    private var ticks = 0L
+    private var cursor = 0
+    var planned = 0
+        private set
+    var failed = 0
+        private set
+
+    private val state get() = rt.state
+    private val level: ServerLevel get() = rt.server.overworld()
+    private val tuning get() = Balance.config.roads
+
+    fun tick() {
+        ticks++
+        if (ticks % tuning.planIntervalTicks.coerceAtLeast(1) != 0L) return
+        val nations = state.alive()
+        if (nations.isEmpty()) return
+        repeat(nations.size) {
+            val nation = nations[Math.floorMod(cursor++, nations.size)]
+            if (planFor(nation)) return
+        }
+    }
+
+    /**
+     * Road orders still being worked. Orders on unloaded land finish abstractly and only wait to be placed when the
+     * chunk loads, so they don't hold the town back — up to a hard cap, so an unwatched town can't queue forever.
+     */
+    fun pending(nation: Int): Int {
+        val roads = state.orders.values.filter { it.nation == nation && it.type == WorkType.ROAD }
+        return if (roads.size >= MAX_QUEUED) Int.MAX_VALUE else roads.count { !it.pendingPlacement }
+    }
+
+    private companion object {
+        const val MAX_QUEUED = 10
+    }
+
+    private fun cooling(key: String) = (retryAt[key] ?: 0L) > ticks
+
+    private fun coolDown(key: String, ticks: Long) {
+        retryAt[key] = this.ticks + ticks
+    }
+
+    /** Plans at most one road for the nation. True when something was ordered. */
+    fun planFor(nation: Nation): Boolean {
+        fun stop(reason: String): Boolean {
+            lastReason[nation.id] = reason
+            return false
+        }
+        if (pending(nation.id) >= tuning.maxPendingPerNation) return stop("공사 대기 중")
+        val ground = ground()
+        val capitalX = Chunks.x(nation.capital) * 16 + 8
+        val capitalZ = Chunks.z(nation.capital) * 16 + 8
+        val hub = hub(nation, ground) ?: return stop(if (ground.height(capitalX, capitalZ) == null) "수도가 불러와지지 않음" else "수도 주변에 빈 땅이 없음")
+        if (!network.hasNetwork(nation.id)) {
+            val blocked = blocker(nation, Chunks.x(hub), Chunks.z(hub), 4)
+            if (cooling("plaza:${nation.id}")) return stop("광장 재시도 대기")
+            val cells = RoadPathfinder.plaza(Chunks.x(hub), Chunks.z(hub), 2, ground, blocked)
+            if (cells.size < 5) {
+                coolDown("plaza:${nation.id}", 1200)
+                return stop("광장 자리가 고르지 않음 (${cells.size}칸, 중심 ${Chunks.x(hub)}, ${Chunks.z(hub)})")
+            }
+            lastReason[nation.id] = "광장"
+            return order(nation, RoadKind.PLAZA, cells)
+        }
+        val buildings = state.buildings.values
+            .filter { it.nation == nation.id && it.complete && !it.linked && it.kind != BuildingKind.WALLS }
+            .sortedBy { dist2(it.box.centerX, it.box.centerZ, hub) }
+        for (b in buildings.take(4)) {
+            val key = "b:${b.id}"
+            if (cooling(key)) continue
+            val blocked = blocker(nation, b.box.centerX.toInt(), b.box.centerZ.toInt(), tuning.streetRange + 16)
+            if (street(nation, b, ground, blocked)) {
+                lastReason[nation.id] = "골목길 (건물 #${b.id})"
+                return true
+            }
+        }
+        for (town in state.settlements.values) {
+            if (town.owner != nation.id) continue
+            val key = "t:${town.id}"
+            if (cooling(key)) continue
+            val blocked = blocker(nation, Chunks.x(town.center) * 16 + 8, Chunks.z(town.center) * 16 + 8, tuning.highwayRange + 16)
+            if (highway(nation, town.center, key, ground, blocked)) {
+                lastReason[nation.id] = "간선 도로 (${town.name})"
+                return true
+            }
+        }
+        if (nation.id in frontage || buildings.isEmpty() && network.cellsOf(nation.id).size < 40) {
+            if (extend(nation, ground, hub)) {
+                frontage -= nation.id
+                lastReason[nation.id] = "새 길 (집 지을 자리)"
+                return true
+            }
+            return stop("새 길을 낼 곳을 못 찾음")
+        }
+        return stop(if (buildings.isEmpty()) "할 일 없음" else "건물 ${buildings.size}개 연결 실패 또는 대기")
+    }
+
+    private fun ground() = WorldRoadGround(level) { rt.sim.terrain(it) }
+
+    fun wantFrontage(nation: Int) {
+        frontage += nation
+    }
+
+    /**
+     * Opens a new street: from a point some 18-28 blocks out from a random existing road cell, inside our own land and
+     * away from other streets, back to the network. Points nearer the plaza win, so the town grows in rings.
+     */
+    private fun extend(nation: Nation, ground: RoadGround, hub: Long): Boolean {
+        val own = network.cellsOf(nation.id)
+        if (own.isEmpty()) return false
+        val rng = rt.sim.rng
+        val boxes = state.buildings.values.filter { it.kind != BuildingKind.WALLS }.map { it.box }
+        var best: Long? = null
+        var from: Long? = null
+        var bestScore = Double.MAX_VALUE
+        repeat(32) {
+            val c = own[rng.nextInt(own.size)]
+            val d = rng.nextInt(4)
+            val len = 18 + rng.nextInt(11)
+            val tx = Chunks.x(c) + intArrayOf(1, -1, 0, 0)[d] * len
+            val tz = Chunks.z(c) + intArrayOf(0, 0, 1, -1)[d] * len
+            if (state.owners[Chunks.pack(tx shr 4, tz shr 4)] != nation.id) return@repeat
+            if (Chunks.pack(tx, tz) in state.roadBans) return@repeat
+            if (boxes.any { tx >= it.minX - 2 && tx <= it.maxX + 2 && tz >= it.minZ - 2 && tz <= it.maxZ + 2 }) return@repeat
+            if (network.anyIn(tx - 7, tz - 7, tx + 7, tz + 7)) return@repeat
+            if (ground.height(tx, tz) == null || ground.cost(tx, tz) >= 6.0) return@repeat
+            val score = kotlin.math.sqrt(dist2(tx.toDouble(), tz.toDouble(), hub)) + rng.nextDouble() * 12
+            if (score < bestScore) {
+                bestScore = score
+                best = Chunks.pack(tx, tz)
+                from = c
+            }
+        }
+        val target = best ?: return false
+        val tx = Chunks.x(target)
+        val tz = Chunks.z(target)
+        val blocked = blocker(nation, tx, tz, tuning.streetRange + 16)
+        val path = RoadPathfinder.find(
+            ground, tx, tz, Chunks.x(from!!), Chunks.z(from!!),
+            goal = { network.nationAt(it) == nation.id },
+            existing = { network.nationAt(it) == nation.id },
+            blocked = blocked, range = tuning.streetRange, maxNodes = tuning.streetNodes
+        ) ?: return false
+        val fresh = path.filter { !network.isRoad(it) }
+        if (fresh.size < 4) return false
+        return order(nation, RoadKind.STREET, fresh)
+    }
+
+    /**
+     * A free lot of [sizeX]×[sizeZ] beside one of the nation's streets: inside its land, clear of buildings and roads
+     * (keeping a one-block yard), not on water, and on loaded land also fairly level and free of unregistered builds.
+     */
+    fun findLot(nation: Nation, sizeX: Int, sizeZ: Int): Box? {
+        val cells = network.cellsOf(nation.id)
+        if (cells.isEmpty()) return null
+        val hx = Chunks.x(nation.capital) * 16 + 8
+        val hz = Chunks.z(nation.capital) * 16 + 8
+        val buildings = state.buildings.values.toList()
+        return RoadLots.find(cells, hx, hz, sizeX, sizeZ, rt.sim.rng, { box -> lotOk(nation, box, buildings) })
+    }
+
+    private fun lotOk(nation: Nation, box: Box, buildings: List<Building>): Boolean {
+        for (c in box.chunks()) {
+            if (state.owners[c] != nation.id) return false
+            if (rt.sim.terrain(c) == Terrain.WATER) return false
+        }
+        if (buildings.any { work.clashes(it, box) }) return false
+        if (network.anyIn(box.minX - RoadLots.YARD, box.minZ - RoadLots.YARD, box.maxX + RoadLots.YARD, box.maxZ + RoadLots.YARD)) return false
+        if (!BlockClass.loaded(level, box)) return true
+        if (BlockClass.waterRatio(level, box.minX, box.minZ, box.maxX, box.maxZ) > 0.2) return false
+        var lo = Int.MAX_VALUE
+        var hi = Int.MIN_VALUE
+        for (x in box.minX..box.maxX step 2) for (z in box.minZ..box.maxZ step 2) {
+            val y = RoadBlocks.groundY(level, x, z)
+            lo = minOf(lo, y)
+            hi = maxOf(hi, y)
+            val top = level.getBlockState(BlockPos(x, y, z))
+            if (BlockClass.constructed(top) && !RoadBlocks.road(top) && !top.`is`(BlockTags.LOGS)) return false
+        }
+        return hi - lo <= 4
+    }
+
+    /** The building rule: some road (ours, or any path block on the ground) within [RoadLots.REACH] blocks of the footprint. */
+    fun nearRoad(box: Box): Boolean = RoadLots.near(box, RoadLots.REACH) { x, z ->
+        network.isRoad(Chunks.pack(x, z)) || (level.chunkSource.hasChunk(x shr 4, z shr 4) && RoadBlocks.road(level.getBlockState(BlockPos(x, RoadBlocks.groundY(level, x, z), z))))
+    }
+
+    /** Road cells planned but not yet paved near a point, so the client can count them as road while drawing a lot. */
+    fun plannedNear(x: Int, z: Int, radius: Int, limit: Int = 2000): List<Long> {
+        val out = ArrayList<Long>()
+        for (road in state.roads.values) {
+            if (road.built) continue
+            for (c in road.cells) {
+                if (kotlin.math.abs(Chunks.x(c) - x) <= radius && kotlin.math.abs(Chunks.z(c) - z) <= radius) {
+                    out += c
+                    if (out.size >= limit) return out
+                }
+            }
+        }
+        return out
+    }
+
+    /** The capital's ground column nearest the chunk center that is free to pave. */
+    private fun hub(nation: Nation, ground: RoadGround): Long? {
+        val cx = Chunks.x(nation.capital) * 16 + 8
+        val cz = Chunks.z(nation.capital) * 16 + 8
+        if (ground.height(cx, cz) == null) return null
+        val blocked = blocker(nation, cx, cz, 12)
+        for (r in 0..8) for (dx in -r..r) for (dz in -r..r) {
+            if (maxOf(kotlin.math.abs(dx), kotlin.math.abs(dz)) != r) continue
+            val x = cx + dx
+            val z = cz + dz
+            if (blocked(x, z) || ground.height(x, z) == null || ground.cost(x, z) >= 6.0) continue
+            return Chunks.pack(x, z)
+        }
+        return null
+    }
+
+    private fun dist2(x: Double, z: Double, cell: Long): Double {
+        val dx = x - Chunks.x(cell)
+        val dz = z - Chunks.z(cell)
+        return dx * dx + dz * dz
+    }
+
+    /** Buildings, player bans and foreign land are off limits. */
+    private fun blocker(nation: Nation, cx: Int, cz: Int, range: Int): (Int, Int) -> Boolean {
+        val boxes = state.buildings.values.filter { it.kind != BuildingKind.WALLS }.map { it.box }.filter {
+            it.maxX >= cx - range && it.minX <= cx + range && it.maxZ >= cz - range && it.minZ <= cz + range
+        }
+        return { x, z ->
+            val cell = Chunks.pack(x, z)
+            cell in state.roadBans ||
+                boxes.any { x >= it.minX && x <= it.maxX && z >= it.minZ && z <= it.maxZ } ||
+                state.owners[Chunks.pack(x shr 4, z shr 4)].let { it != null && it != nation.id }
+        }
+    }
+
+    private fun street(nation: Nation, b: Building, ground: RoadGround, blocked: (Int, Int) -> Boolean): Boolean {
+        val key = "b:${b.id}"
+        val own = network.cellsOf(nation.id)
+        if (own.isEmpty()) return false
+        val doors = doors(b.box, own)
+        // Already touching a road: nothing to do.
+        if (doors.any { d -> network.nationAt(d) == nation.id }) {
+            b.linked = true
+            return false
+        }
+        for (door in doors) {
+            val x = Chunks.x(door)
+            val z = Chunks.z(door)
+            if (blocked(x, z) || ground.height(x, z) == null) continue
+            val target = own.minBy { dist2(x.toDouble(), z.toDouble(), it) }
+            val path = RoadPathfinder.find(
+                ground, x, z, Chunks.x(target), Chunks.z(target),
+                goal = { network.nationAt(it) == nation.id },
+                existing = { network.nationAt(it) == nation.id },
+                blocked = blocked, range = tuning.streetRange, maxNodes = tuning.streetNodes
+            ) ?: continue
+            b.linked = true
+            val fresh = path.filter { !network.isRoad(it) }
+            if (fresh.isEmpty()) return false
+            return order(nation, RoadKind.STREET, fresh)
+        }
+        failed++
+        val tries = failures.merge(key, 1, Int::plus)!!
+        // Some houses sit on a ledge or in a crowded corner; give up after a few tries instead of searching forever.
+        if (tries >= 3) b.linked = true else coolDown(key, 2400)
+        return false
+    }
+
+    /** Door candidates: the middle of each side, one block out, nearest side to the existing streets first. */
+    private fun doors(box: Box, toward: List<Long>): List<Long> {
+        val mx = (box.minX + box.maxX) / 2
+        val mz = (box.minZ + box.maxZ) / 2
+        val sides = listOf(
+            Chunks.pack(box.maxX + 1, mz), Chunks.pack(box.minX - 1, mz),
+            Chunks.pack(mx, box.maxZ + 1), Chunks.pack(mx, box.minZ - 1)
+        )
+        return sides.sortedBy { s -> toward.minOf { dist2(Chunks.x(s).toDouble(), Chunks.z(s).toDouble(), it) } }
+    }
+
+    private fun highway(nation: Nation, center: Long, key: String, ground: RoadGround, blocked: (Int, Int) -> Boolean): Boolean {
+        val x = Chunks.x(center) * 16 + 8
+        val z = Chunks.z(center) * 16 + 8
+        if (network.nationAt(Chunks.pack(x, z)) == nation.id) return false
+        val own = network.cellsOf(nation.id)
+        if (own.isEmpty()) return false
+        val target = own.minBy { dist2(x.toDouble(), z.toDouble(), it) }
+        if (dist2(x.toDouble(), z.toDouble(), target) > tuning.highwayRange.toDouble() * tuning.highwayRange) return false
+        var start: Long? = null
+        for (r in 0..6) {
+            for (dx in -r..r) for (dz in -r..r) {
+                val sx = x + dx
+                val sz = z + dz
+                if (!blocked(sx, sz) && ground.height(sx, sz) != null && ground.cost(sx, sz) < 6.0) {
+                    start = Chunks.pack(sx, sz)
+                    break
+                }
+            }
+            if (start != null) break
+        }
+        if (start == null) {
+            coolDown(key, 6000)
+            return false
+        }
+        val path = RoadPathfinder.find(
+            ground, Chunks.x(start), Chunks.z(start), Chunks.x(target), Chunks.z(target),
+            goal = { network.nationAt(it) == nation.id },
+            existing = { network.nationAt(it) == nation.id },
+            blocked = blocked, range = tuning.highwayRange, maxNodes = tuning.highwayNodes, greed = 1.3
+        )
+        if (path == null) {
+            failed++
+            coolDown(key, 6000)
+            return false
+        }
+        val wide = RoadPathfinder.widen(path, 2, ground, blocked).filter { !network.isRoad(it) }
+        coolDown(key, 1200)
+        if (wide.isEmpty()) return false
+        return order(nation, RoadKind.HIGHWAY, wide)
+    }
+
+    private fun order(nation: Nation, kind: RoadKind, cells: List<Long>, by: String? = null, conscript: Boolean = false): Boolean {
+        val road = network.add(nation.id, kind, cells) ?: return false
+        work.orderRoad(nation, road, by, conscript)
+        planned++
+        com.grandstrategy.GrandStrategy.LOGGER.info("Road planned for {}: {} with {} cells", nation.name, kind, road.cells.size)
+        return true
+    }
+
+    /** Player tool: pave every free column in the rectangle. */
+    fun requestManual(nation: Nation, area: Box, by: String?, conscript: Boolean): Outcome {
+        work.territoryError(nation, area)?.let { return Outcome.fail(it) }
+        if (!BlockClass.loaded(level, area)) return Outcome.fail("그 땅이 아직 불러와지지 않았다.")
+        val boxes = state.buildings.values.filter { it.kind != BuildingKind.WALLS }.map { it.box }
+        val cells = ArrayList<Long>()
+        for (x in area.minX..area.maxX) for (z in area.minZ..area.maxZ) {
+            if (boxes.any { x >= it.minX && x <= it.maxX && z >= it.minZ && z <= it.maxZ }) continue
+            val cell = Chunks.pack(x, z)
+            state.roadBans -= cell
+            cells += cell
+        }
+        if (cells.isEmpty()) return Outcome.fail("건물 안이라 길을 낼 칸이 없다.")
+        val road = network.add(nation.id, RoadKind.MANUAL, cells) ?: return Outcome.fail("이미 전부 길이다.")
+        work.orderRoad(nation, road, by, conscript)
+        return Outcome.ok("길을 내도록 지시했다 (${road.cells.size}칸).")
+    }
+
+    /** Player tool: take road (ours or a vanilla village path) out of the rectangle and keep the planner away from it. */
+    fun requestClear(nation: Nation, area: Box, by: String?, conscript: Boolean): Outcome {
+        work.territoryError(nation, area)?.let { return Outcome.fail(it) }
+        val affected = HashSet<Int>()
+        for (x in area.minX..area.maxX) for (z in area.minZ..area.maxZ) network.roadAt(Chunks.pack(x, z))?.let { affected += it.id }
+        val removed = network.clear(area.minX, area.minZ, area.maxX, area.maxZ, ban = true)
+        // Orders still paving the affected roads are restarted on whatever is left of them.
+        for (o in state.orders.values.toList()) {
+            val id = o.road ?: continue
+            if (o.type != WorkType.ROAD || id !in affected) continue
+            work.cancel(o)
+            state.roads[id]?.let { work.orderRoad(nation, it, o.by, o.conscript) }
+        }
+        val box = Box(area.minX, area.minY - 2, area.minZ, area.maxX, area.maxY + 3, area.maxZ)
+        work.orderUnroad(nation, box, removed, by, conscript)
+        return Outcome.ok("길을 걷어내도록 지시했다 (등록된 길 ${removed.size}칸 + 흙길). 이 자리엔 자동으로 길을 내지 않는다.")
+    }
+
+    /** Called when something is built over road: those columns stop being road without being banned. */
+    fun builtOver(box: Box) {
+        network.clear(box.minX, box.minZ, box.maxX, box.maxZ, ban = false)
+    }
+
+    fun forget(road: Road) = network.drop(road)
+
+    fun status(): String {
+        val byNation = state.roads.values.groupBy { it.nation }
+        val lines = state.alive().map { n ->
+            val roads = byNation[n.id].orEmpty()
+            val built = roads.count { it.built }
+            val why = lastReason[n.id]?.let { " · 마지막 판단: $it" } ?: ""
+            "${n.name}: 길 ${roads.size}개 (${roads.sumOf { it.cells.size }}칸, 완공 $built) · 주문 ${state.orders.values.count { it.nation == n.id && it.type == WorkType.ROAD }}$why"
+        }
+        val head = "길 ${state.roads.size}개 · ${network.cellCount}칸 · 계획 $planned · 실패 $failed · 금지 칸 ${state.roadBans.size}"
+        return (listOf(head) + lines).joinToString("\n")
+    }
+
+    /** Paves every road again (with the nation's current era of paving). */
+    fun repave(): Int {
+        var n = 0
+        for (road in state.roads.values.toList()) {
+            if (state.orders.values.any { it.road == road.id }) continue
+            val nation = state.nation(road.nation) ?: continue
+            road.built = false
+            work.orderRoad(nation, road, null, false)
+            n++
+        }
+        return n
+    }
+
+    /** Lets the planner revisit every building (after a balance change, for example). */
+    fun replan() {
+        for (b in state.buildings.values) b.linked = false
+        retryAt.clear()
+        failures.clear()
+    }
+
+    fun orderView(order: WorkOrder): Road? = order.road?.let { state.roads[it] }
+}

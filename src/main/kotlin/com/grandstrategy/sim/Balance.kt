@@ -45,6 +45,20 @@ data class AgentTuning(
 )
 
 @Serializable
+data class RoadTuning(
+    /** Ticks between road planning attempts; each attempt serves one nation, round robin. */
+    val planIntervalTicks: Int = 60,
+    val maxPendingPerNation: Int = 2,
+    val streetRange: Int = 72,
+    val highwayRange: Int = 200,
+    val streetNodes: Int = 12000,
+    val highwayNodes: Int = 40000,
+    /** Construction tech levels where paving moves from dirt path to cobble, stone brick and concrete. */
+    val tierLevels: List<Int> = listOf(2, 4, 7),
+    val workers: Int = 4
+)
+
+@Serializable
 data class BalanceConfig(
     val startPopulation: Double = 30.0,
     val startMilitary: Double = 10.0,
@@ -102,7 +116,8 @@ data class BalanceConfig(
     ),
     val terrain: Map<Terrain, Yields> = Terrain.entries.associateWith { Yields(it.food, it.wood, it.stone, it.iron, it.gold) },
     val ai: AiTuning = AiTuning(),
-    val agents: AgentTuning = AgentTuning()
+    val agents: AgentTuning = AgentTuning(),
+    val roads: RoadTuning = RoadTuning()
 ) {
     fun problems(): List<String> = buildList {
         if (workersPerChunk <= 0) add("workersPerChunk must be > 0")

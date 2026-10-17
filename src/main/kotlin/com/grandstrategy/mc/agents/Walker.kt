@@ -183,8 +183,10 @@ class Walker(private val population: AgentPopulation, private val level: () -> S
                     val y2 = ny + dy
                     if (!stand(x2, y2, z2)) continue
                     if (dy > 0 && !passable(world, nx, ny + 2, nz)) break
-                    val step = (if (diagonal) 1.414 else 1.0) + (if (dy > 0) 0.6 else 0.0) + (if (dy < 0) 0.2 * -dy else 0.0) +
+                    var step = (if (diagonal) 1.414 else 1.0) + (if (dy > 0) 0.6 else 0.0) + (if (dy < 0) 0.2 * -dy else 0.0) +
                         (if (roof(world, x2, y2, z2)) 5.0 else 0.0)
+                    // Villagers keep to streets when one goes their way, as townsfolk do.
+                    if (com.grandstrategy.mc.build.RoadBlocks.road(world.getBlockState(BlockPos(x2, y2 - 1, z2)))) step *= ROAD_FACTOR
                     val key = BlockPos.asLong(x2, y2, z2)
                     val c = base + step
                     if (c < cost.getOrDefault(key, Double.MAX_VALUE)) {
@@ -311,6 +313,7 @@ class Walker(private val population: AgentPopulation, private val level: () -> S
         const val MAX_NODES = 1600
         const val RANGE = 72
         const val SEARCHES_PER_TICK = 6
+        const val ROAD_FACTOR = 0.6
         val DIRS = arrayOf(intArrayOf(1, 0), intArrayOf(-1, 0), intArrayOf(0, 1), intArrayOf(0, -1), intArrayOf(1, 1), intArrayOf(1, -1), intArrayOf(-1, 1), intArrayOf(-1, -1))
         val STEPS = intArrayOf(0, 1, -1, -2, -3)
     }

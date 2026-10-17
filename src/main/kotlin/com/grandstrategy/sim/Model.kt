@@ -55,7 +55,19 @@ enum class BuildingKind(val label: String, val facility: Facility?) {
     }
 }
 
-enum class WorkType(val label: String) { BUILD("건축"), DEMOLISH("철거"), FLATTEN("평탄화") }
+enum class WorkType(val label: String) { BUILD("건축"), DEMOLISH("철거"), FLATTEN("평탄화"), ROAD("길 닦기"), UNROAD("길 걷어내기") }
+
+enum class RoadKind(val label: String) { PLAZA("광장"), STREET("골목길"), HIGHWAY("간선 도로"), MANUAL("직접 낸 길") }
+
+/** A stretch of road: the block columns (packed with [Chunks.pack]) it covers. Blocks are laid by a ROAD work order. */
+@Serializable
+class Road(
+    val id: Int,
+    val nation: Int,
+    val kind: RoadKind,
+    val cells: MutableList<Long> = mutableListOf(),
+    var built: Boolean = false
+)
 
 @Serializable
 data class Box(val minX: Int, val minY: Int, val minZ: Int, val maxX: Int, val maxY: Int, val maxZ: Int) {
@@ -90,7 +102,9 @@ class Building(
     var box: Box,
     val template: String? = null,
     var complete: Boolean = false,
-    val detected: Boolean = false
+    val detected: Boolean = false,
+    /** The road planner has connected (or given up connecting) this building to its nation's streets. */
+    var linked: Boolean = false
 )
 
 @Serializable
@@ -111,7 +125,10 @@ class WorkOrder(
     var progress: Long = 0,
     var total: Long = 0,
     var abstractWork: Double = 0.0,
-    var pendingPlacement: Boolean = false
+    var pendingPlacement: Boolean = false,
+    val road: Int? = null,
+    /** UNROAD: the road cells taken out of the network when the order was given. */
+    val cells: List<Long> = emptyList()
 )
 
 enum class TechBranch(val label: String, val effect: String) {
@@ -276,7 +293,11 @@ class WorldState(
     var nextOrderId: Int = 1,
     val buildings: MutableMap<Int, Building> = linkedMapOf(),
     val orders: MutableMap<Int, WorkOrder> = linkedMapOf(),
-    val events: MutableList<GameEvent> = mutableListOf()
+    val events: MutableList<GameEvent> = mutableListOf(),
+    var nextRoadId: Int = 1,
+    val roads: MutableMap<Int, Road> = linkedMapOf(),
+    /** Columns a player took road out of; automatic planning never paves them again. */
+    val roadBans: MutableSet<Long> = mutableSetOf()
 ) {
     fun alive(): List<Nation> = nations.values.filter { it.alive }
 

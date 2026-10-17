@@ -232,6 +232,9 @@ object GsCommands {
                 }))))
             .then(literal("walls").then(xz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.WALLS, box(ctx, false), conscript = true)) }))
             .then(literal("flatten").then(xz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.FLATTEN, box(ctx, false), conscript = true)) }))
+            .then(literal("road").then(xz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.ROAD, box(ctx, false))) }))
+            .then(literal("unroad").then(xz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.ROAD, box(ctx, false), remove = true)) }))
+            .then(literal("roads").executes { ctx -> reply(ctx, Texts.prefix().append(Texts.plain(rt().roads.status() + "\n" + rt().sites.status(), ChatFormatting.WHITE))) })
             .then(literal("demolish").then(xyz { ctx -> send(ctx, com.grandstrategy.net.ToServer.Order(com.grandstrategy.net.WorkTool.DEMOLISH, box(ctx, true), conscript = true)) }))
             .then(literal("select").then(argument("x", IntegerArgumentType.integer()).then(argument("y", IntegerArgumentType.integer()).then(argument("z", IntegerArgumentType.integer()).executes { ctx ->
                 send(ctx, com.grandstrategy.net.ToServer.Select(i(ctx, "x"), i(ctx, "y"), i(ctx, "z")))
@@ -299,6 +302,20 @@ object GsCommands {
         })
         .then(literal("save").executes { ctx -> rt().save(); reply(ctx, Outcome.ok("저장했다.")) })
         .then(literal("map").then(literal("rebuild").executes { ctx -> reply(ctx, rt().setup.rebuildMap()) }))
+        .then(literal("roads")
+            .then(literal("plan").executes { ctx ->
+                val r = rt()
+                val before = r.roads.planned
+                for (n in r.state.alive()) r.roads.planFor(n)
+                reply(ctx, Outcome.ok("길 계획 ${r.roads.planned - before}개 새로 지시"))
+            })
+            .then(literal("repave").executes { ctx ->
+                reply(ctx, Outcome.ok("길 ${rt().roads.repave()}개를 다시 포장한다"))
+            })
+            .then(literal("replan").executes { ctx ->
+                rt().roads.replan()
+                reply(ctx, Outcome.ok("모든 건물의 길 연결을 다시 검토한다"))
+            }))
         .then(literal("pregen")
             .then(literal("cancel").executes { ctx -> reply(ctx, rt().setup.cancel()) })
             .then(literal("status").executes { ctx -> reply(ctx, Outcome.ok("미리 생성 상태 ${rt().settings.pregen} · ${"%.1f".format(rt().setup.progress() * 100)}% (${rt().settings.pregenIndex}청크)")) }))

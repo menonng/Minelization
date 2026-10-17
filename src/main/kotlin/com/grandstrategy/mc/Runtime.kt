@@ -26,6 +26,8 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
     val agentDisplay = AgentDisplay(this, population)
     val work = com.grandstrategy.mc.build.WorkManager(this)
     val workService = com.grandstrategy.mc.build.WorkService(this, work)
+    val roads = com.grandstrategy.mc.build.RoadPlanner(this, work)
+    val sites = com.grandstrategy.mc.build.SiteDisplay(this)
     val menus = com.grandstrategy.mc.ui.MenuService(this)
     val setup = WorldSetup(this)
     val map = com.grandstrategy.mc.map.MapTileStore(this)
@@ -70,6 +72,8 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         agentDisplay.tick()
         agentNanos = System.nanoTime() - agentStart
         work.tick()
+        roads.tick()
+        sites.tick()
         workService.tick()
         menus.tick()
         setup.tick()

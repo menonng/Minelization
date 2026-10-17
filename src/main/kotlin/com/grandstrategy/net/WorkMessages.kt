@@ -6,7 +6,7 @@ import com.grandstrategy.sim.WorkType
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-enum class WorkTool(val label: String) { SELECT("선택"), BUILD("건축"), WALLS("성벽"), DEMOLISH("철거"), FLATTEN("평탄화") }
+enum class WorkTool(val label: String) { SELECT("선택"), BUILD("건축"), WALLS("성벽"), DEMOLISH("철거"), FLATTEN("평탄화"), ROAD("길") }
 
 @Serializable
 data class TemplateView(val index: Int, val name: String, val style: String, val kind: BuildingKind, val sizeX: Int, val sizeY: Int, val sizeZ: Int)
@@ -26,7 +26,7 @@ sealed class ToServer {
     data class Mode(val on: Boolean) : ToServer()
 
     @Serializable
-    data class Order(val tool: WorkTool, val box: Box, val template: Int = -1, val rotation: Int = 0, val conscript: Boolean = false) : ToServer()
+    data class Order(val tool: WorkTool, val box: Box, val template: Int = -1, val rotation: Int = 0, val conscript: Boolean = false, val remove: Boolean = false) : ToServer()
 
     @Serializable
     data class Select(val x: Int, val y: Int, val z: Int) : ToServer()
@@ -51,7 +51,9 @@ sealed class ToClient {
         val buildings: List<BuildingView>,
         val orders: List<OrderView>,
         val builders: Int,
-        val idle: Int
+        val idle: Int,
+        /** Planned road cells near the player that are not paved yet; they count as road for the build check. */
+        val roads: List<Long> = emptyList()
     ) : ToClient()
 
     @Serializable
