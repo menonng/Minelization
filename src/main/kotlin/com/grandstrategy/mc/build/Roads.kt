@@ -291,13 +291,14 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
      * A free lot of [sizeX]×[sizeZ] beside one of the nation's streets: inside its land, clear of buildings and roads
      * (keeping a one-block yard), not on water, and on loaded land also fairly level and free of unregistered builds.
      */
-    fun findLot(nation: Nation, sizeX: Int, sizeZ: Int): Box? {
+    /** A lot for a design [width] wide and [depth] deep, with the rotation that turns its front to the street. */
+    fun findLot(nation: Nation, width: Int, depth: Int): Pair<Box, Int>? {
         val cells = network.cellsOf(nation.id)
         if (cells.isEmpty()) return null
         val hx = Chunks.x(nation.capital) * 16 + 8
         val hz = Chunks.z(nation.capital) * 16 + 8
         val buildings = state.buildings.values.toList()
-        return RoadLots.find(cells, hx, hz, sizeX, sizeZ, rt.sim.rng, { box -> lotOk(nation, box, buildings) })
+        return RoadLots.find(cells, hx, hz, width, depth, rt.sim.rng, { box -> lotOk(nation, box, buildings) })
     }
 
     private fun lotOk(nation: Nation, box: Box, buildings: List<Building>): Boolean {
@@ -308,7 +309,7 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
         if (buildings.any { work.clashes(it, box) }) return false
         if (network.anyIn(box.minX - RoadLots.YARD, box.minZ - RoadLots.YARD, box.maxX + RoadLots.YARD, box.maxZ + RoadLots.YARD)) return false
         if (!BlockClass.loaded(level, box)) return true
-        if (BlockClass.waterRatio(level, box.minX, box.minZ, box.maxX, box.maxZ) > 0.2) return false
+        if (work.waterError(nation, box) != null) return false
         var lo = Int.MAX_VALUE
         var hi = Int.MIN_VALUE
         for (x in box.minX..box.maxX step 2) for (z in box.minZ..box.maxZ step 2) {
@@ -372,7 +373,8 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
             val cell = Chunks.pack(x, z)
             cell in state.roadBans ||
                 boxes.any { x >= it.minX && x <= it.maxX && z >= it.minZ && z <= it.maxZ } ||
-                state.owners[Chunks.pack(x shr 4, z shr 4)].let { it != null && it != nation.id }
+                state.owners[Chunks.pack(x shr 4, z shr 4)].let { it != null && it != nation.id } ||
+                !rt.zones.allowed(nation.id, Chunks.pack(x shr 4, z shr 4))
         }
     }
 

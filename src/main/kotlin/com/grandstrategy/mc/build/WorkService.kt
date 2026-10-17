@@ -89,6 +89,7 @@ class WorkService(private val rt: Runtime, private val work: WorkManager) {
         return when (m.action) {
             "demolish" -> work.requestDemolishBuilding(nation, building, player.uuid.toString(), m.conscript)
             "assign" -> work.assign(building, m.kind ?: return Outcome.fail("용도를 고른다."))
+            "renovate" -> work.renovate(nation, building, m.kind ?: return Outcome.fail("용도를 고른다."), player.uuid.toString(), m.conscript)
             "forget" -> if (building.detected && rt.state.orders.values.none { it.building == building.id }) {
                 building.kind.facility?.let { f -> nation.facilities[f] = (nation.count(f) - 1).coerceAtLeast(0) }
                 rt.state.buildings.remove(building.id)
@@ -121,7 +122,8 @@ class WorkService(private val rt: Runtime, private val work: WorkManager) {
 
     private fun view(b: Building, player: ServerPlayer): BuildingView {
         val mine = rt.ruledNation(player)?.id ?: rt.citizenNation(player)?.id
-        return BuildingView(b.id, b.box, b.kind, b.nation != null && b.nation == mine, b.complete, rt.state.nation(b.nation)?.name ?: "", b.detected)
+        val theme = work.templates.styleAt(rt.server.overworld(), b.box.centerX.toInt(), b.box.centerZ.toInt())
+        return BuildingView(b.id, b.box, b.kind, b.nation != null && b.nation == mine, b.complete, rt.state.nation(b.nation)?.name ?: "", b.detected, theme, work.facingRoad(b.box))
     }
 
     private fun sendInfo(player: ServerPlayer) {
@@ -170,7 +172,8 @@ class WorkService(private val rt: Runtime, private val work: WorkManager) {
             orders = orders,
             builders = builders,
             idle = idle,
-            roads = rt.roads.plannedNear(player.blockX, player.blockZ, 112)
+            roads = rt.roads.plannedNear(player.blockX, player.blockZ, 112),
+            marine = (nation?.level(com.grandstrategy.sim.TechBranch.MARINE) ?: 0) >= 1
         ))
     }
 

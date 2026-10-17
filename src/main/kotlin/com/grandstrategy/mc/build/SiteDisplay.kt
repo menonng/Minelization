@@ -154,15 +154,22 @@ class SiteDisplay(private val rt: Runtime) {
 
     private fun f(v: Double) = String.format(Locale.ROOT, "%.3ff", v)
 
-    private fun transform(sx: Double, sy: Double, sz: Double) =
-        "transformation:{left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f],translation:[0f,0f,0f],scale:[${f(sx)},${f(sy)},${f(sz)}]}"
+    private fun transform(sx: Double, sy: Double, sz: Double, tx: Double = 0.0, ty: Double = 0.0, tz: Double = 0.0) =
+        "transformation:{left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f],translation:[${f(tx)},${f(ty)},${f(tz)}],scale:[${f(sx)},${f(sy)},${f(sz)}]}"
 
-    private fun block(state: String, x: Double, y: Double, z: Double, sx: Double, sy: Double, sz: Double, lit: Boolean = false): Part {
+    /**
+     * A box of [item]'s block model spanning (x, y, z) to (x + sx, y + sy, z + sz). Drawn as an item display rather than a
+     * block display: both are vanilla, but the 26.3 client does not draw block displays, while item displays of block
+     * items render the same cube. Item models are centred on the entity, hence the half-size offset.
+     */
+    private fun block(item: String, x: Double, y: Double, z: Double, sx: Double, sy: Double, sz: Double, lit: Boolean = false): Part {
         val light = if (lit) ",brightness:{sky:15,block:15}" else ""
-        val tag = TagParser.parseCompoundFully("{block_state:$state,${transform(sx, sy, sz)},view_range:1.5f$light}")
-        val e = Display.BlockDisplay(EntityTypes.BLOCK_DISPLAY, level)
+        val tag = TagParser.parseCompoundFully(
+            "{item:{id:\"$item\",count:1},item_display:\"none\",${transform(sx, sy, sz, sx / 2, sy / 2, sz / 2)},view_range:1.5f$light}"
+        )
+        val e = Display.ItemDisplay(EntityTypes.ITEM_DISPLAY, level)
         e.load(TagValueInput.create(ProblemReporter.DISCARDING, level.registryAccess(), tag))
-        return Part(EntityTypes.BLOCK_DISPLAY, x, y, z, e.entityData.nonDefaultValues ?: emptyList())
+        return Part(EntityTypes.ITEM_DISPLAY, x, y, z, e.entityData.nonDefaultValues ?: emptyList())
     }
 
     private fun label(o: WorkOrder, pct: Int): List<SynchedEntityData.DataValue<*>> {
@@ -184,12 +191,13 @@ class SiteDisplay(private val rt: Runtime) {
     private companion object {
         const val RANGE = 80.0
         const val MAX_STRIPES = 18
-        const val LOG_Y = "{Name:\"minecraft:stripped_spruce_log\",Properties:{axis:\"y\"}}"
-        const val LOG_X = "{Name:\"minecraft:stripped_spruce_log\",Properties:{axis:\"x\"}}"
-        const val LOG_Z = "{Name:\"minecraft:stripped_spruce_log\",Properties:{axis:\"z\"}}"
-        const val YELLOW = "{Name:\"minecraft:yellow_concrete\"}"
-        const val BLACK = "{Name:\"minecraft:black_concrete\"}"
-        const val ORANGE = "{Name:\"minecraft:orange_concrete\"}"
-        const val WHITE = "{Name:\"minecraft:white_concrete\"}"
+        // Stripped wood has bark texture on every side, so beams need no rotation whichever way they run.
+        const val LOG_Y = "minecraft:stripped_spruce_wood"
+        const val LOG_X = "minecraft:stripped_spruce_wood"
+        const val LOG_Z = "minecraft:stripped_spruce_wood"
+        const val YELLOW = "minecraft:yellow_concrete"
+        const val BLACK = "minecraft:black_concrete"
+        const val ORANGE = "minecraft:orange_concrete"
+        const val WHITE = "minecraft:white_concrete"
     }
 }

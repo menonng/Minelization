@@ -302,6 +302,19 @@ object GsCommands {
         })
         .then(literal("save").executes { ctx -> rt().save(); reply(ctx, Outcome.ok("저장했다.")) })
         .then(literal("map").then(literal("rebuild").executes { ctx -> reply(ctx, rt().setup.rebuildMap()) }))
+        .then(literal("designs").executes { ctx -> reply(ctx, rt().work.gallery(ctx.source.playerOrException.blockPosition().offset(4, 0, 4))) })
+        .then(literal("design").then(argument("kind", StringArgumentType.word())
+            .suggests { _, b -> SharedSuggestionProvider.suggest(com.grandstrategy.sim.BuildingKind.entries.map { it.name.lowercase() }, b) }
+            .executes { ctx ->
+                val kind = runCatching { com.grandstrategy.sim.BuildingKind.valueOf(StringArgumentType.getString(ctx, "kind").uppercase()) }.getOrNull()
+                    ?: return@executes reply(ctx, Outcome.fail("모르는 용도"))
+                reply(ctx, rt().work.showcase(kind, ctx.source.playerOrException.blockPosition().offset(2, 0, 2)))
+            }
+            .then(literal("slope").executes { ctx ->
+                val kind = runCatching { com.grandstrategy.sim.BuildingKind.valueOf(StringArgumentType.getString(ctx, "kind").uppercase()) }.getOrNull()
+                    ?: return@executes reply(ctx, Outcome.fail("모르는 용도"))
+                reply(ctx, rt().work.showcase(kind, ctx.source.playerOrException.blockPosition(), slope = true))
+            })))
         .then(literal("roads")
             .then(literal("plan").executes { ctx ->
                 val r = rt()
@@ -410,7 +423,7 @@ object GsCommands {
         lastStatusAt = now
         lastPackets = r.agentDisplay.packetsTotal
         lastBytes = r.agentDisplay.bytesEstimate
-        return "개체 ${r.population.agents.count}명${r.population.benchmarkTotal?.let { " (벤치마크 $it)" } ?: ""} · 표시 중 ${r.agentDisplay.shownTotal} · 패킷 ${"%.0f".format(pps)}/초 (약 ${"%.1f".format(kbps)} KB/초)\n" +
+        return "개체 ${r.population.agents.count}명${r.population.benchmarkTotal?.let { " (벤치마크 $it)" } ?: ""} · 화면에 ${r.agentDisplay.shownCount}명 (가까이 ${r.agentDisplay.nearCount}명, 플레이어별 합 ${r.agentDisplay.shownTotal}) · 패킷 ${"%.0f".format(pps)}/초 (약 ${"%.1f".format(kbps)} KB/초)\n" +
             "개체 처리 ${"%.3f".format(r.agentNanos / 1e6)}ms/틱 (표시 ${"%.3f".format(r.agentDisplay.lastNanos / 1e6)}ms) · 서버 MSPT ${"%.2f".format(mspt)} · TPS ${"%.2f".format(tps)}\n" +
             "순간이동 ${r.agentDisplay.teleports}건 · 경로 탐색 ${r.agentDisplay.walker.searches}회 (평균 ${"%.3f".format(r.agentDisplay.walker.searchNanos / 1e6 / r.agentDisplay.walker.searches.coerceAtLeast(1))}ms) · 시간대 ${r.population.phase()}"
     }

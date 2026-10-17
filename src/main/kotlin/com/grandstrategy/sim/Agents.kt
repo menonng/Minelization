@@ -40,6 +40,8 @@ interface AgentPlanner {
     fun meeting(nation: Int): Pair<Float, Float>? = null
     fun visibleAt(x: Float, z: Float): Boolean = false
     fun shown(i: Int): Boolean = false
+    /** Whether a citizen of [nation] may stand at (x, z): its land plus one chunk around it. */
+    fun allowed(nation: Int, x: Float, z: Float): Boolean = true
 }
 
 class Agents(initial: Int = 1024) {
@@ -203,13 +205,23 @@ class Agents(initial: Int = 1024) {
                 val dz = targetZ[i] - z[i]
                 val dist = sqrt(dx * dx + dz * dz)
                 val move = speed[i] * dt
-                if (dist <= move) {
+                val nx = if (dist <= move) targetX[i] else x[i] + dx / dist * move
+                val nz = if (dist <= move) targetZ[i] else z[i] + dz / dist * move
+                val n = nation[i]
+                if (planner.allowed(n, x[i], z[i]) && !planner.allowed(n, nx, nz)) {
+                    // The route leaves the nation's land: slide along the border, or stop at it.
+                    when {
+                        planner.allowed(n, nx, z[i]) -> x[i] = nx
+                        planner.allowed(n, x[i], nz) -> z[i] = nz
+                        else -> arrive(i, rng)
+                    }
+                } else if (dist <= move) {
                     x[i] = targetX[i]
                     z[i] = targetZ[i]
                     arrive(i, rng)
                 } else {
-                    x[i] += dx / dist * move
-                    z[i] += dz / dist * move
+                    x[i] = nx
+                    z[i] = nz
                 }
             }
         }
@@ -366,7 +378,7 @@ class AgentPopulation(val sim: Simulation) {
         return home.x to home.z
     }
 
-    fun tick(hot: Iterable<Int>) {
+    fun tick(hot: Iterable<Int>, warm: Iterable<Int> = emptyList()) {
         tick++
         val bucket = (tick % FAR_INTERVAL).toInt()
         val rng = sim.rng
@@ -380,6 +392,8 @@ class AgentPopulation(val sim: Simulation) {
         if (tick % NEAR_INTERVAL == 0L) {
             for (j in hot) if (tick - agents.lastStep[j] >= NEAR_INTERVAL) agents.step(j, tick, dayPhase, planner, rng)
         }
+        // Agents on someone's screen but not walked by A*: step often enough that their motion looks continuous.
+        for (j in warm) if (tick - agents.lastStep[j] >= WARM_INTERVAL) agents.step(j, tick, dayPhase, planner, rng)
     }
 
     fun now(): Long = tick
@@ -425,5 +439,6 @@ class AgentPopulation(val sim: Simulation) {
     companion object {
         const val FAR_INTERVAL = 20
         const val NEAR_INTERVAL = 2L
+        const val WARM_INTERVAL = 4L
     }
 }

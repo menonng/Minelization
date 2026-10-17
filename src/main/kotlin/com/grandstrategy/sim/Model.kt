@@ -100,7 +100,7 @@ class Building(
     var nation: Int?,
     var kind: BuildingKind,
     var box: Box,
-    val template: String? = null,
+    var template: String? = null,
     var complete: Boolean = false,
     val detected: Boolean = false,
     /** The road planner has connected (or given up connecting) this building to its nation's streets. */
@@ -128,7 +128,9 @@ class WorkOrder(
     var pendingPlacement: Boolean = false,
     val road: Int? = null,
     /** UNROAD: the road cells taken out of the network when the order was given. */
-    val cells: List<Long> = emptyList()
+    val cells: List<Long> = emptyList(),
+    /** BUILD over an existing building (renovation): tear down what is in [box] first. */
+    val clear: Boolean = false
 )
 
 enum class TechBranch(val label: String, val effect: String) {
@@ -139,7 +141,8 @@ enum class TechBranch(val label: String, val effect: String) {
     ADMINISTRATION("행정", "안정도 +3, 과확장 한도 +5"),
     EDUCATION("교육", "연구 속도 +15%"),
     MILITARY("군사", "전투력 +10%"),
-    CONSTRUCTION("건설", "시설 비용 -8%, 성벽 +5%")
+    CONSTRUCTION("건설", "시설 비용 -8%, 성벽 +5%"),
+    MARINE("수중 구조물", "1단계부터 물 위·물속 건설 (이후 수중 도시)")
 }
 
 enum class Policy(val label: String, val description: String) {

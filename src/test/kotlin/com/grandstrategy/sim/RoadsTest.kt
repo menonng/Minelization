@@ -133,9 +133,17 @@ class RoadsTest {
     fun lotsSitBesideTheRoadWithAYard() {
         val street = (0..20).map { Chunks.pack(it, 0) }
         val roadSet = street.toSet()
-        val lot = assertNotNull(RoadLots.find(street, 0, 0, 7, 5, kotlin.random.Random(1), { box ->
-            (box.minX..box.maxX).none { x -> (box.minZ - 1..box.maxZ + 1).any { z -> Chunks.pack(x, z) in roadSet } }
+        val (lot, rotation) = assertNotNull(RoadLots.find(street, 0, 0, 7, 5, kotlin.random.Random(1), { box ->
+            (box.minX - 1..box.maxX + 1).none { x -> (box.minZ - 1..box.maxZ + 1).any { z -> Chunks.pack(x, z) in roadSet } }
         }))
+        // The front (north for rotation 0, then east, south, west) looks across the one-block yard onto road.
+        val front = when (rotation) {
+            0 -> (lot.minX..lot.maxX).map { Chunks.pack(it, lot.minZ - 2) }
+            1 -> (lot.minZ..lot.maxZ).map { Chunks.pack(lot.maxX + 2, it) }
+            2 -> (lot.minX..lot.maxX).map { Chunks.pack(it, lot.maxZ + 2) }
+            else -> (lot.minZ..lot.maxZ).map { Chunks.pack(lot.minX - 2, it) }
+        }
+        assertTrue(front.any { it in roadSet }, "lot $lot rotation $rotation does not face the road")
         val gap = street.minOf { c ->
             maxOf(maxOf(lot.minX - Chunks.x(c), Chunks.x(c) - lot.maxX, 0), maxOf(lot.minZ - Chunks.z(c), Chunks.z(c) - lot.maxZ, 0))
         }

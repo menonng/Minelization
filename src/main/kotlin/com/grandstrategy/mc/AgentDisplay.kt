@@ -26,6 +26,13 @@ import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket
+import net.minecraft.network.protocol.game.ClientboundBundlePacket
+import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket
+import net.minecraft.network.protocol.game.ClientGamePacketListener
+import net.minecraft.network.protocol.game.VecDelta
+import net.minecraft.network.protocol.game.VecDeltaCodec
+import net.minecraft.core.BlockPos
+import net.minecraft.util.Mth
 import net.minecraft.world.entity.PositionPath
 import net.minecraft.world.entity.npc.villager.Villager
 import net.minecraft.world.entity.npc.villager.VillagerData
@@ -37,6 +44,15 @@ import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.floor
 
+/**
+ * Shows the population as villagers: every agent in the chunks a player can see is sent to that player as a
+ * packet-only villager (no server entity). Two tiers keep thousands cheap:
+ *  - near (within [AgentTuning.visibleRadius]): A*-walked by [Walker], moved every 2 ticks with head turns;
+ *  - far (the rest of the view distance): follow their simulated position on the ground, moved every
+ *    [AgentTuning.farUpdateTicks] ticks (or [AgentTuning.distantUpdateTicks] past 96 blocks) only when they moved,
+ *    as small relative-move packets, all of a player's packets for a tick sent as one bundle.
+ * Who sees whom is recomputed every [VIEW_INTERVAL] ticks, and new villagers are spawned nearest-first under a budget.
+ */
 class AgentDisplay(private val rt: Runtime, private val population: AgentPopulation) {
     private val agents: Agents get() = population.agents
     private val level: ServerLevel get() = rt.server.overworld()
@@ -47,13 +63,23 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
     private var shownY = FloatArray(0)
     private var shownYaw = FloatArray(0)
     private var shownPitch = FloatArray(0)
+    private var lastSync = LongArray(0)
+    /** Squared distance to the nearest viewer at the last view update; picks the far update rate. */
+    private var nearest = FloatArray(0)
     val walker = com.grandstrategy.mc.agents.Walker(population) { rt.server.overworld() }
     var teleports = 0L
         private set
     private var skin = ByteArray(0)
     private val viewers = HashMap<UUID, IntOpenHashSet>()
     private val grid = Long2ObjectOpenHashMap<IntArrayList>()
+    /** Near agents: walked by A*. */
     private val hot = IntOpenHashSet()
+    /** Every agent shown to anyone. */
+    private val shown = IntOpenHashSet()
+    /** Shown but not near: stepped by the simulation a little more often so their motion reads smoothly. */
+    private val warm = IntOpenHashSet()
+    private val codecs = HashMap<Int, VecDeltaCodec>()
+    private val outbox = HashMap<UUID, ArrayList<Packet<in ClientGamePacketListener>>>()
     private val templates = HashMap<Int, List<SynchedEntityData.DataValue<*>>>()
     private var ticks = 0L
 
@@ -74,7 +100,12 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
 
     fun hotAgents(): Iterable<Int> = hot
 
-    fun isShown(i: Int): Boolean = hot.contains(i)
+    fun warmAgents(): Iterable<Int> = warm
+
+    fun isShown(i: Int): Boolean = shown.contains(i)
+
+    val nearCount get() = hot.size
+    val shownCount get() = shown.size
 
     private fun ensure() {
         val n = agents.capacity
@@ -85,6 +116,8 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         shownY = shownY.copyOf(n)
         shownYaw = shownYaw.copyOf(n)
         shownPitch = shownPitch.copyOf(n)
+        lastSync = lastSync.copyOf(n)
+        nearest = nearest.copyOf(n)
         skin = skin.copyOf(n).also { for (k in skin.size until n) it[k] = -1 }
     }
 
@@ -94,8 +127,11 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         ensure()
         packetsLastTick = 0
         if (ticks % GRID_INTERVAL == 0L || grid.isEmpty()) rebuildGrid()
-        if (ticks % UPDATE_INTERVAL == 0L) update()
+        if (ticks % VIEW_INTERVAL == 0L) updateViews()
+        if (ticks % UPDATE_INTERVAL == 0L) moveNear()
+        moveFar()
         walker.tick(hot, 0.05f)
+        flush()
         packetsTotal += packetsLastTick
         lastNanos = System.nanoTime() - start
     }
@@ -108,23 +144,27 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         grid.values.removeIf { it.isEmpty }
     }
 
-    private fun update() {
+    private fun viewChunks(player: ServerPlayer): Int =
+        minOf(population.tuning.displayChunks, rt.server.playerList.viewDistance, maxOf(2, player.requestedViewDistance()))
+
+    private fun updateViews() {
         val tuning = population.tuning
-        val radius = tuning.visibleRadius.toDouble()
-        val r2 = radius * radius
-        val chunkRadius = (tuning.visibleRadius shr 4) + 1
+        val near2 = tuning.visibleRadius.toDouble().let { it * it }
         val players = rt.server.playerList.players
         val online = HashSet<UUID>()
-        val wants = HashMap<UUID, IntOpenHashSet>()
-        val union = IntOpenHashSet()
+        val wants = HashMap<UUID, Pair<IntOpenHashSet, List<Pair<Int, Double>>>>()
+        val nearUnion = IntOpenHashSet()
+        java.util.Arrays.fill(nearest, Float.MAX_VALUE)
         for (player in players) {
             online += player.uuid
             if (player.level() != level) continue
             val px = player.x
             val pz = player.z
             val center = player.chunkPosition()
-            val dists = ArrayList<Pair<Int, Double>>()
-            for (dx in -chunkRadius..chunkRadius) for (dz in -chunkRadius..chunkRadius) {
+            val r = viewChunks(player)
+            val all = ArrayList<Pair<Int, Double>>()
+            for (dx in -r..r) for (dz in -r..r) {
+                if (dx * dx + dz * dz > (r + 1) * (r + 1)) continue
                 val list = grid.get(Chunks.pack(center.x + dx, center.z + dz)) ?: continue
                 for (k in 0 until list.size) {
                     val i = list.getInt(k)
@@ -132,34 +172,58 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
                     val ddx = agents.x[i] - px
                     val ddz = agents.z[i] - pz
                     val d = ddx * ddx + ddz * ddz
-                    if (d <= r2) dists += i to d
+                    all += i to d
+                    if (d < nearest[i]) nearest[i] = d.toFloat()
                 }
             }
-            if (dists.size > tuning.maxVisiblePerPlayer) dists.sortBy { it.second }
+            all.sortBy { it.second }
             val want = IntOpenHashSet()
-            for (k in 0 until minOf(dists.size, tuning.maxVisiblePerPlayer)) want.add(dists[k].first)
-            wants[player.uuid] = want
-            union.addAll(want)
+            for ((i, _) in all) {
+                if (want.size >= tuning.maxShownPerPlayer) break
+                want.add(i)
+            }
+            // Near tier with hysteresis: agents already walked by A* keep their place until well past the radius, so a
+            // crowd at the edge does not flip between tiers (each flip could show as a small hop).
+            val keep2 = (tuning.visibleRadius + 8.0).let { it * it }
+            var guided = 0
+            for ((i, d) in all) {
+                if (guided >= tuning.maxVisiblePerPlayer) break
+                if (hot.contains(i) && d <= keep2 && want.contains(i)) {
+                    nearUnion.add(i)
+                    guided++
+                }
+            }
+            for ((i, d) in all) {
+                if (guided >= tuning.maxVisiblePerPlayer || d > near2) break
+                if (want.contains(i) && nearUnion.add(i)) guided++
+            }
+            wants[player.uuid] = want to all
         }
+        // Near agents get the walker; ones that cannot be placed on the ground stay far.
         val failed = IntOpenHashSet()
         var snaps = SNAPS_PER_UPDATE
-        val iterUnion = union.iterator()
-        while (iterUnion.hasNext()) {
-            val i = iterUnion.nextInt()
+        val iterNear = nearUnion.iterator()
+        while (iterNear.hasNext()) {
+            val i = iterNear.nextInt()
             if (hot.contains(i) || agents.guided[i]) continue
-            if (snaps <= 0 || !walker.take(i)) failed.add(i)
+            // Snap to ground from the height the player has been seeing, so turning near is not a visible hop.
+            if (codecs.containsKey(i)) agents.y[i] = shownY[i]
+            if (snaps <= 0 || !walker.take(i, strict = codecs.containsKey(i))) failed.add(i)
             snaps--
         }
-        union.removeAll(failed)
+        nearUnion.removeAll(failed)
         val iterOld = hot.iterator()
         while (iterOld.hasNext()) {
             val i = iterOld.nextInt()
-            if (!union.contains(i)) walker.release(i)
+            if (!nearUnion.contains(i)) walker.release(i)
         }
+        hot.clear()
+        hot.addAll(nearUnion)
+        // Per player: hide what left the view, spawn what entered (nearest first, within the spawn budget).
+        shown.clear()
         for (player in players) {
             val seen = viewers.getOrPut(player.uuid) { IntOpenHashSet() }
-            val want = wants[player.uuid] ?: IntOpenHashSet()
-            want.removeAll(failed)
+            val (want, ordered) = wants[player.uuid] ?: (IntOpenHashSet() to emptyList())
             val gone = IntOpenHashSet()
             val iter = seen.iterator()
             while (iter.hasNext()) {
@@ -167,16 +231,24 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
                 if (!want.contains(i)) gone.add(i)
             }
             hide(player, seen, gone)
-            val iterWant = want.iterator()
-            while (iterWant.hasNext()) {
-                val i = iterWant.nextInt()
-                if (seen.add(i)) show(player, i)
+            var budget = tuning.spawnsPerUpdate
+            for ((i, _) in ordered) {
+                if (budget <= 0) break
+                if (!want.contains(i) || seen.contains(i)) continue
+                if (show(player, i)) {
+                    seen.add(i)
+                    budget--
+                }
             }
+            shown.addAll(seen)
         }
-        hot.clear()
-        hot.addAll(union)
-        viewers.keys.retainAll(online)
-        broadcastMoves()
+        warm.clear()
+        val iterShown = shown.iterator()
+        while (iterShown.hasNext()) {
+            val i = iterShown.nextInt()
+            if (!hot.contains(i)) warm.add(i)
+        }
+        for (uuid in viewers.keys.filter { it !in online }) removePlayer(uuid)
         shownTotal = viewers.values.sumOf { it.size }
     }
 
@@ -186,7 +258,15 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         return yaw to (if (working) 28f else 0f)
     }
 
-    private fun broadcastMoves() {
+    /** Heading from the agent's last shown position to where it is now, for agents not driven by the walker. */
+    private fun heading(i: Int, x: Float, z: Float): Float {
+        val dx = x - shownX[i]
+        val dz = z - shownZ[i]
+        if (dx * dx + dz * dz < 0.0004f) return shownYaw[i]
+        return (Math.toDegrees(atan2(dz.toDouble(), dx.toDouble())) - 90.0).toFloat()
+    }
+
+    private fun moveNear() {
         val iter = hot.iterator()
         while (iter.hasNext()) {
             val i = iter.nextInt()
@@ -194,60 +274,139 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
             val x = agents.x[i]
             val z = agents.z[i]
             val y = if (agents.y[i].isNaN()) shownY[i] else agents.y[i]
-            val dx = x - shownX[i]
-            val dz = z - shownZ[i]
-            val dy = y - shownY[i]
             val (yaw, pitch) = pose(i)
-            val moved = dx * dx + dz * dz + dy * dy >= 0.0004f
-            val turned = kotlin.math.abs(yaw - shownYaw[i]) > 2f || kotlin.math.abs(pitch - shownPitch[i]) > 2f
-            if (!moved && !turned) continue
+            send(i, x, y, z, yaw, pitch, near = true)
+        }
+    }
+
+    private fun moveFar() {
+        val far = population.tuning.farUpdateTicks.coerceAtLeast(1)
+        val distant = population.tuning.distantUpdateTicks.coerceAtLeast(far)
+        val iter = warm.iterator()
+        while (iter.hasNext()) {
+            val i = iter.nextInt()
+            if (netId[i] == 0 || !agents.alive[i]) continue
+            val every = if (nearest[i] > DISTANT * DISTANT) distant else far
+            if ((i + ticks) % every != 0L) continue
+            val x = agents.x[i]
+            val z = agents.z[i]
+            val y = farY(i, x, z) ?: continue
+            val pitch = if (agents.state[i] == com.grandstrategy.sim.AgentState.WORK) 28f else 0f
+            send(i, x, y, z, heading(i, x, z), pitch, near = false)
+        }
+    }
+
+    /**
+     * Ground height for an agent the walker isn't guiding. If the surface under it is something built (a roof, a wall
+     * top, a tree trunk) it keeps its last height, i.e. it walks through the building at street level instead of
+     * popping onto the roof.
+     */
+    private fun farY(i: Int, x: Float, z: Float): Float? {
+        val bx = floor(x).toInt()
+        val bz = floor(z).toInt()
+        if (!level.chunkSource.hasChunk(bx shr 4, bz shr 4)) return null
+        val h = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bx, bz)
+        val below = level.getBlockState(BlockPos(bx, h - 1, bz))
+        val built = com.grandstrategy.mc.build.BlockClass.constructed(below) && !com.grandstrategy.mc.build.RoadBlocks.road(below) &&
+            !below.`is`(net.minecraft.world.level.block.Blocks.FARMLAND)
+        if (built && shownY[i] != 0f && kotlin.math.abs(shownY[i] - h) < 16) return shownY[i]
+        return h.toFloat()
+    }
+
+    /** Sends a move for agent [i] to everyone who sees it, if it moved or turned enough to matter. */
+    private fun send(i: Int, x: Float, y: Float, z: Float, yaw: Float, pitch: Float, near: Boolean) {
+        val dx = x - shownX[i]
+        val dz = z - shownZ[i]
+        val dy = y - shownY[i]
+        val moved = dx * dx + dz * dz + dy * dy >= (if (near) 0.0004f else 0.01f)
+        val turned = kotlin.math.abs(yaw - shownYaw[i]) > (if (near) 2f else 12f) || kotlin.math.abs(pitch - shownPitch[i]) > 2f
+        if (!moved && !turned) return
+        if (near) {
             val jump = kotlin.math.sqrt(dx * dx + dz * dz + dy * dy)
             if (jump > TELEPORT_DISTANCE) {
                 teleports++
-                if (teleports <= 20) com.grandstrategy.GrandStrategy.LOGGER.warn(
-                    "Agent {} jumped {} blocks (state {}, guided {})", agents.uid[i], "%.2f".format(jump), agents.state[i], agents.guided[i]
+                if (teleports <= 40) com.grandstrategy.GrandStrategy.LOGGER.warn(
+                    "Agent {} jumped {} blocks (state {}, guided {}) from {} {} {} to {} {} {}", agents.uid[i], "%.2f".format(jump), agents.state[i], agents.guided[i],
+                    "%.1f".format(shownX[i]), "%.1f".format(shownY[i]), "%.1f".format(shownZ[i]), "%.1f".format(x), "%.1f".format(y), "%.1f".format(z)
                 )
             }
-            shownX[i] = x
-            shownZ[i] = z
-            shownY[i] = y
-            shownYaw[i] = yaw
-            shownPitch[i] = pitch
-            val sync = ClientboundEntityPositionSyncPacket(netId[i], PositionPath.of(Vec3(x.toDouble(), y.toDouble(), z.toDouble())), yaw, pitch, true)
-            val head = headPacket(netId[i], yaw)
-            for ((uuid, seen) in viewers) {
-                if (!seen.contains(i)) continue
-                val player = rt.server.playerList.getPlayer(uuid) ?: continue
-                player.connection.send(sync)
-                player.connection.send(head)
-                packetsLastTick += 2
-                bytesEstimate += 44
+        }
+        val headTurned = kotlin.math.abs(yaw - shownYaw[i]) > (if (near) 2f else 20f)
+        shownX[i] = x
+        shownZ[i] = z
+        shownY[i] = y
+        shownYaw[i] = yaw
+        shownPitch[i] = pitch
+        val pos = Vec3(x.toDouble(), y.toDouble(), z.toDouble())
+        val codec = codecs.getOrPut(i) { VecDeltaCodec().also { it.setBase(pos) } }
+        // Small steps go as relative moves (~12 bytes); an exact sync now and then stops rounding drift.
+        val delta: VecDelta? = if (ticks - lastSync[i] >= RESYNC_TICKS) null else codec.tryEncode(pos)
+        val move: Packet<in ClientGamePacketListener> = if (delta == null) {
+            lastSync[i] = ticks
+            ClientboundEntityPositionSyncPacket(netId[i], PositionPath.of(pos), yaw, pitch, true)
+        } else {
+            ClientboundMoveEntityPacket.PosRot(netId[i], delta, Mth.packDegrees(yaw), Mth.packDegrees(pitch), true)
+        }
+        codec.setBase(pos)
+        val head = if (headTurned) headPacket(netId[i], yaw) else null
+        for ((uuid, seen) in viewers) {
+            if (!seen.contains(i)) continue
+            val box = outbox.getOrPut(uuid) { ArrayList() }
+            box += move
+            bytesEstimate += if (delta == null) 60 else 14
+            if (head != null) {
+                box.add(head)
+                bytesEstimate += 5
             }
         }
     }
 
-    private fun show(player: ServerPlayer, i: Int) {
+    private fun flush() {
+        for ((uuid, list) in outbox) {
+            if (list.isEmpty()) continue
+            val player = rt.server.playerList.getPlayer(uuid)
+            if (player != null) {
+                var k = 0
+                while (k < list.size) {
+                    val part = list.subList(k, minOf(list.size, k + BUNDLE_LIMIT))
+                    player.connection.send(if (part.size == 1) part[0] else ClientboundBundlePacket(ArrayList(part)))
+                    packetsLastTick += part.size
+                    k += BUNDLE_LIMIT
+                }
+            }
+            list.clear()
+        }
+    }
+
+    private fun show(player: ServerPlayer, i: Int): Boolean {
         if (netId[i] == 0) netId[i] = level.nextEntityId
-        val x = agents.x[i]
-        val z = agents.z[i]
-        val y = if (agents.y[i].isNaN()) (ground(x, z) ?: return) else agents.y[i]
-        shownX[i] = x
-        shownZ[i] = z
-        shownY[i] = y
-        val (yaw, pitch) = pose(i)
-        shownYaw[i] = yaw
-        shownPitch[i] = pitch
+        // An agent already on someone's screen spawns where the others see it, so everyone shares one delta base.
+        val already = codecs.containsKey(i)
+        val x = if (already) shownX[i] else agents.x[i]
+        val z = if (already) shownZ[i] else agents.z[i]
+        val y = if (already) shownY[i] else if (agents.guided[i] && !agents.y[i].isNaN()) agents.y[i] else (farY(i, x, z) ?: return false)
+        if (!already) {
+            shownX[i] = x
+            shownZ[i] = z
+            shownY[i] = y
+            val (yaw, pitch) = pose(i)
+            shownYaw[i] = yaw
+            shownPitch[i] = pitch
+            codecs[i] = VecDeltaCodec().also { it.setBase(Vec3(x.toDouble(), y.toDouble(), z.toDouble())) }
+            lastSync[i] = ticks
+        }
+        val yaw = shownYaw[i]
+        val pitch = shownPitch[i]
         if (skin[i] < 0) skin[i] = skinFor(i, x, z).toByte()
         val uuid = UUID(0x6D696E656CL, agents.uid[i].toLong())
-        player.connection.send(
-            ClientboundAddEntityPacket(netId[i], uuid, x.toDouble(), y.toDouble(), z.toDouble(), pitch, yaw, EntityTypes.VILLAGER, 0, Vec3.ZERO, yaw.toDouble())
-        )
-        player.connection.send(ClientboundSetEntityDataPacket(netId[i], template(skin[i].toInt())))
+        val box = outbox.getOrPut(player.uuid) { ArrayList() }
+        box += ClientboundAddEntityPacket(netId[i], uuid, x.toDouble(), y.toDouble(), z.toDouble(), pitch, yaw, EntityTypes.VILLAGER, 0, Vec3.ZERO, yaw.toDouble())
+        box += ClientboundSetEntityDataPacket(netId[i], template(skin[i].toInt()))
         tool(i)?.let { item ->
-            player.connection.send(ClientboundSetEquipmentPacket(netId[i], listOf(com.mojang.datafixers.util.Pair(EquipmentSlot.MAINHAND, ItemStack(item)))))
+            box += ClientboundSetEquipmentPacket(netId[i], listOf(com.mojang.datafixers.util.Pair(EquipmentSlot.MAINHAND, ItemStack(item))))
         }
-        packetsLastTick += 3
         bytesEstimate += 100
+        return true
     }
 
     private fun tool(i: Int): net.minecraft.world.item.Item? = when (Job.entries[agents.job[i].toInt()]) {
@@ -269,10 +428,10 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
             val i = iter.nextInt()
             seen.remove(i)
             if (netId[i] != 0) ids.add(netId[i])
+            if (viewers.values.none { it.contains(i) }) codecs.remove(i)
         }
         if (ids.isNotEmpty()) {
-            player.connection.send(ClientboundRemoveEntitiesPacket(ids))
-            packetsLastTick++
+            outbox.getOrPut(player.uuid) { ArrayList() } += ClientboundRemoveEntitiesPacket(ids)
         }
     }
 
@@ -286,11 +445,26 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         netId[i] = 0
         skin[i] = -1
         hot.remove(i)
+        shown.remove(i)
+        warm.remove(i)
+        codecs.remove(i)
         walker.forget(i)
     }
 
     fun removePlayer(uuid: UUID) {
-        viewers.remove(uuid)
+        viewers.remove(uuid)?.let { dropUnseen(it) }
+    }
+
+    /**
+     * Forgets the shared position base of agents nobody sees any more. Without this, a player who reconnects would get
+     * them spawned at the last position anyone saw, and the next update would show the gap as a jump.
+     */
+    private fun dropUnseen(ids: IntOpenHashSet) {
+        val iter = ids.iterator()
+        while (iter.hasNext()) {
+            val i = iter.nextInt()
+            if (viewers.values.none { it.contains(i) }) codecs.remove(i)
+        }
     }
 
     fun hideAll() {
@@ -298,7 +472,11 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
             val player = rt.server.playerList.getPlayer(uuid) ?: continue
             hide(player, seen, IntOpenHashSet(seen))
         }
+        flush()
         viewers.clear()
+        shown.clear()
+        warm.clear()
+        codecs.clear()
     }
 
     private fun ground(x: Float, z: Float): Float? {
@@ -347,7 +525,7 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         villager.entityData.nonDefaultValues ?: emptyList()
     }
 
-    private fun headPacket(id: Int, yaw: Float): Packet<*> {
+    private fun headPacket(id: Int, yaw: Float): ClientboundRotateHeadPacket {
         val buf = FriendlyByteBuf(Unpooled.buffer(8))
         buf.writeVarInt(id)
         buf.writeByte(floor(yaw * 256f / 360f).toInt())
@@ -356,8 +534,12 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
 
     private companion object {
         const val GRID_INTERVAL = 10L
+        const val VIEW_INTERVAL = 10L
         const val UPDATE_INTERVAL = 2L
         const val TELEPORT_DISTANCE = 1.2f
-        const val SNAPS_PER_UPDATE = 25
+        const val SNAPS_PER_UPDATE = 40
+        const val RESYNC_TICKS = 100L
+        const val DISTANT = 96f
+        const val BUNDLE_LIMIT = 4000
     }
 }

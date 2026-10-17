@@ -51,9 +51,18 @@ class Walker(private val population: AgentPopulation, private val level: () -> S
         if (queued.add(i)) pending.addLast(i)
     }
 
-    fun take(i: Int): Boolean {
+    /**
+     * Hands an agent to the walker. [strict] (an agent already on screen) refuses when the nearest place it could stand
+     * is more than a step from where the player sees it, so taking over never shows as a hop; it is tried again later.
+     */
+    fun take(i: Int, strict: Boolean = false): Boolean {
         val world = level()
         val cell = snap(world, agents.x[i], agents.y[i], agents.z[i]) ?: return false
+        if (strict) {
+            val dx = cell.x + 0.5f - agents.x[i]
+            val dz = cell.z + 0.5f - agents.z[i]
+            if (dx * dx + dz * dz > 1.5f * 1.5f || (!agents.y[i].isNaN() && abs(cell.y - agents.y[i]) > 1.5f)) return false
+        }
         agents.x[i] = cell.x + 0.5f
         agents.z[i] = cell.z + 0.5f
         agents.y[i] = cell.y.toFloat()
@@ -157,6 +166,10 @@ class Walker(private val population: AgentPopulation, private val level: () -> S
         var best = start
         var bestH = h(startCell.x, startCell.y, startCell.z)
         var expanded = 0
+        val nation = agents.nation[i]
+        val planner = population.planner
+        // Citizens stay on their nation's land (plus a chunk); one already outside may walk back in.
+        val leashed = planner.allowed(nation, startCell.x + 0.5f, startCell.z + 0.5f)
         while (open.isNotEmpty() && expanded < MAX_NODES) {
             val node = open.poll()[0]
             val nx = BlockPos.getX(node)
@@ -177,6 +190,7 @@ class Walker(private val population: AgentPopulation, private val level: () -> S
                 val x2 = nx + d[0]
                 val z2 = nz + d[1]
                 if (abs(x2 - startCell.x) > RANGE || abs(z2 - startCell.z) > RANGE) continue
+                if (leashed && ((x2 shr 4) != (nx shr 4) || (z2 shr 4) != (nz shr 4)) && !planner.allowed(nation, x2 + 0.5f, z2 + 0.5f)) continue
                 val diagonal = d[0] != 0 && d[1] != 0
                 if (diagonal && (!clear(world, nx + d[0], ny, nz, cache) || !clear(world, nx, ny, nz + d[1], cache))) continue
                 for (dy in STEPS) {

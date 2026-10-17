@@ -55,6 +55,7 @@ object Icons {
         TechBranch.EDUCATION -> Items.BOOKSHELF
         TechBranch.MILITARY -> Items.IRON_SWORD
         TechBranch.CONSTRUCTION -> Items.BRICKS
+        TechBranch.MARINE -> Items.HEART_OF_THE_SEA
     }
 
     fun policy(p: Policy): Item = when (p) {

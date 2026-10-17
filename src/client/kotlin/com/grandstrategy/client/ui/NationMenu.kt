@@ -74,6 +74,7 @@ object NationMenu {
         TechBranch.EDUCATION -> Items.BOOKSHELF
         TechBranch.MILITARY -> Items.IRON_SWORD
         TechBranch.CONSTRUCTION -> Items.BRICKS
+        TechBranch.MARINE -> Items.HEART_OF_THE_SEA
     }
 
     fun policyIcon(p: Policy): Item = when (p) {

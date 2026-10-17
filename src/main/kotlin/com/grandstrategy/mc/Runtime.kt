@@ -20,6 +20,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
     val settings: Settings = save?.settings ?: Settings()
     val state: WorldState = save?.state ?: WorldState(seed = server.overworld().seed)
     val sim = Simulation(state, BiomeTerrain(server.overworld()))
+    val zones = com.grandstrategy.sim.NationZones(state)
     val hooks = WorldHooks(this)
     val cutscenes = Cutscenes(this)
     val population = AgentPopulation(sim)
@@ -68,7 +69,7 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
         val agentStart = System.nanoTime()
         population.dayTime = server.overworld().overworldClockTime
         population.raining = server.overworld().isRaining
-        population.tick(agentDisplay.hotAgents())
+        population.tick(agentDisplay.hotAgents(), agentDisplay.warmAgents())
         agentDisplay.tick()
         agentNanos = System.nanoTime() - agentStart
         work.tick()

@@ -20,18 +20,26 @@ object GrandStrategyClient : ClientModInitializer {
         WorkMode.init()
         com.grandstrategy.client.ui.NationMenu.init()
         com.grandstrategy.client.ui.WorldMap.init()
+        com.grandstrategy.client.ui.BuildingPreview.init()
         ClientPlayNetworking.registerGlobalReceiver(PlayCutscenePayload.TYPE) { payload, _ ->
             CutscenePlayer.start(CutsceneSpec.decode(payload.json))
         }
         val capture = System.getProperty("grandstrategy.capture") == "true"
         var ticks = 0
         var shots = 0
+        var screenTicks = 0
         ClientTickEvents.END_CLIENT_TICK.register { mc ->
             CutscenePlayer.tick()
             if (!CutscenePlayer.active) {
                 WorkMode.tick(mc)
                 com.grandstrategy.client.ui.NationMenu.tick(mc)
                 com.grandstrategy.client.ui.WorldMap.tick(mc)
+            }
+            // Automated capture runs unattended: a pause menu from losing window focus would hide every shot.
+            if (capture && mc.gui.screen() is net.minecraft.client.gui.screens.PauseScreen) mc.gui.setScreen(null)
+            // ...and a panel opened by a test command closes by itself after 15 seconds.
+            if (capture) {
+                if (mc.gui.screen() == null) screenTicks = 0 else if (++screenTicks > 300) mc.gui.setScreen(null)
             }
             if (capture && mc.level != null && !CutscenePlayer.active && ++ticks % 200 == 0) {
                 Screenshot.grab(mc.gameDirectory, "view_%03d.png".format(shots++), mc.gameRenderer.mainRenderTarget(), 1) { }

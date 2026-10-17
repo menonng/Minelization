@@ -33,6 +33,7 @@ class WorkManager(private val rt: Runtime) {
     private val crews = HashMap<Int, IntArrayList>()
     private val credit = HashMap<Int, Double>()
     private val virtualCrew = HashMap<Int, Int>()
+    private val stalled = HashMap<Int, Int>()
     private var ticks = 0L
 
     private class Plan(val pos: LongArray, val op: IntArray) {
@@ -56,6 +57,9 @@ class WorkManager(private val rt: Runtime) {
         val GRASS_ID = Block.getId(Blocks.GRASS_BLOCK.defaultBlockState())
         val WALL_ID = Block.getId(Blocks.STONE_BRICK_WALL.defaultBlockState())
         val BRICK_ID = Block.getId(Blocks.STONE_BRICKS.defaultBlockState())
+        val COBBLE_ID = Block.getId(Blocks.COBBLESTONE.defaultBlockState())
+        const val GALLERY_COL = 17
+        const val GALLERY_ROW = 26
     }
 
     fun cost(nation: Nation, kind: BuildingKind, box: Box? = null): Map<Resource, Double> = when (kind) {
@@ -87,6 +91,17 @@ class WorkManager(private val rt: Runtime) {
         return !inside
     }
 
+    /**
+     * Building on or in water needs the underwater-structures research (the first step toward underwater cities).
+     * Unloaded land is judged by its terrain class.
+     */
+    fun waterError(nation: Nation, box: Box): String? {
+        if (nation.level(TechBranch.MARINE) >= 1) return null
+        val wet = if (BlockClass.loaded(level, box)) BlockClass.waterRatio(level, box.minX, box.minZ, box.maxX, box.maxZ) > 0.0
+        else box.chunks().any { rt.sim.terrain(it) == Terrain.WATER }
+        return if (wet) "물 위·물속에는 지을 수 없다. '${TechBranch.MARINE.label}' 연구가 필요하다." else null
+    }
+
     fun territoryError(nation: Nation, box: Box): String? {
         for (c in box.chunks()) {
             if (state.owners[c] != nation.id) return "영토 밖이 포함돼 있다 ${Chunks.format(c)}"
@@ -102,7 +117,7 @@ class WorkManager(private val rt: Runtime) {
         val footprint = Box(minX, 0, minZ, minX + size.x - 1, 0, minZ + size.z - 1)
         territoryError(nation, footprint)?.let { return Outcome.fail(it) }
         if (!BlockClass.loaded(level, footprint)) return Outcome.fail("그 땅이 아직 불러와지지 않았다.")
-        if (BlockClass.waterRatio(level, footprint.minX, footprint.minZ, footprint.maxX, footprint.maxZ) > 0.3) return Outcome.fail("물 위에는 지을 수 없다.")
+        waterError(nation, footprint)?.let { return Outcome.fail(it) }
         val baseY = BlockClass.medianGround(level, footprint.minX, footprint.minZ, footprint.maxX, footprint.maxZ)
         val box = Box(footprint.minX, baseY, footprint.minZ, footprint.maxX, baseY + size.y - 1, footprint.maxZ)
         overlaps(box)?.let { return Outcome.fail("다른 건물(${it.kind.label} #${it.id})과 겹친다.") }
@@ -113,6 +128,7 @@ class WorkManager(private val rt: Runtime) {
     fun requestWalls(nation: Nation, area: Box, by: String?, conscript: Boolean): Outcome {
         territoryError(nation, area)?.let { return Outcome.fail(it) }
         if (!BlockClass.loaded(level, area)) return Outcome.fail("그 땅이 아직 불러와지지 않았다.")
+        waterError(nation, area)?.let { return Outcome.fail(it) }
         val baseY = BlockClass.medianGround(level, area.minX, area.minZ, area.maxX, area.maxZ)
         val box = Box(area.minX, baseY, area.minZ, area.maxX, baseY + 3, area.maxZ)
         return place(nation, BuildingKind.WALLS, null, 0, box, baseY, by, conscript)
@@ -235,6 +251,127 @@ class WorkManager(private val rt: Runtime) {
         return Outcome.ok("건물 #${building.id}을(를) ${kind.label}(으)로 지정했다.")
     }
 
+    /**
+     * Rebuilds a finished building as [kind] in its own footprint: the old blocks come down and the design for the new
+     * use (in the local village style, front turned to the nearest road) goes up, so a building looks like what it is for.
+     */
+    fun renovate(nation: Nation, building: Building, kind: BuildingKind, by: String?, conscript: Boolean): Outcome {
+        if (kind == BuildingKind.WALLS) return Outcome.fail("성벽은 작업 지정의 성벽 도구로 짓는다.")
+        if (!building.complete) return Outcome.fail("아직 짓는 중이다.")
+        if (state.orders.values.any { it.building == building.id }) return Outcome.fail("이미 작업 중인 건물이다.")
+        val b = building.box
+        if (!BlockClass.loaded(level, b)) return Outcome.fail("그 땅이 아직 불러와지지 않았다.")
+        val theme = Theme.of(templates.styleAt(level, b.centerX.toInt(), b.centerZ.toInt()))
+        val rotation = facingRoad(b)
+        val (w, d) = if (rotation % 2 == 1) b.sizeZ to b.sizeX else b.sizeX to b.sizeZ
+        val (mw, md) = Designs.minSize(kind)
+        if (w < mw || d < md) return Outcome.fail("${kind.label}(으)로 바꾸기엔 좁다 (최소 ${mw}×${md}, 지금 ${w}×${d}).")
+        if (kind.facility != null && building.kind.facility == null && nation.totalFacilities() + pendingFacilities(nation.id) >= nation.claims.size) {
+            return Outcome.fail("시설 수는 영토 수(${nation.claims.size})를 넘을 수 없다.")
+        }
+        val price = cost(nation, kind, b)
+        if (!Actions.canAfford(nation, price)) return Outcome.fail("자원이 부족하다: ${Actions.describe(price)}")
+        Actions.pay(nation, price)
+        building.kind.facility?.let { f -> nation.facilities[f] = (nation.count(f) - 1).coerceAtLeast(0) }
+        val template = Designs.id(kind, theme, w to d)
+        building.kind = kind
+        building.complete = false
+        building.template = template
+        val order = WorkOrder(
+            id = state.nextOrderId++, nation = nation.id, type = WorkType.BUILD, box = b, kind = kind, template = template,
+            rotation = rotation, baseY = b.minY, conscript = conscript, building = building.id, by = by, createdTurn = state.turn,
+            workersWanted = if (conscript) 16 else 8, clear = true
+        )
+        state.orders[order.id] = order
+        return Outcome.ok("${kind.label}(${theme.label} 양식)(으)로 개축을 지시했다 (#${order.id}). 비용 ${Actions.describe(price)}")
+    }
+
+    /** Rotation that turns a north-facing design toward the side of [b] with the most road nearby. */
+    fun facingRoad(b: Box): Int {
+        val counts = IntArray(4)
+        fun road(x: Int, z: Int): Boolean {
+            if (rt.roads.network.isRoad(Chunks.pack(x, z))) return true
+            if (!level.chunkSource.hasChunk(x shr 4, z shr 4)) return false
+            return RoadBlocks.road(level.getBlockState(BlockPos(x, RoadBlocks.groundY(level, x, z), z)))
+        }
+        for (k in 1..4) {
+            for (x in b.minX..b.maxX) {
+                if (road(x, b.minZ - k)) counts[0]++
+                if (road(x, b.maxZ + k)) counts[2]++
+            }
+            for (z in b.minZ..b.maxZ) {
+                if (road(b.minX - k, z)) counts[3]++
+                if (road(b.maxX + k, z)) counts[1]++
+            }
+        }
+        val best = counts.indices.maxBy { counts[it] }
+        return if (counts[best] == 0) 0 else best
+    }
+
+    /**
+     * Admin showcase: every design in every village style on a flat grass platform at the caller's height (columns:
+     * uses, rows: styles), built instantly, with room between rows for a camera.
+     */
+    fun gallery(origin: BlockPos): Outcome {
+        val kinds = BuildingKind.entries.filter { it != BuildingKind.WALLS }
+        var placed = 0
+        val ground = origin.y
+        val width = kinds.size * GALLERY_COL
+        val depth = Theme.entries.size * GALLERY_ROW
+        for (x in origin.x - 4..origin.x + width) for (z in origin.z - 10..origin.z + depth) {
+            for (y in ground - 9 until ground - 1) level.setBlock(BlockPos(x, y, z), Blocks.DIRT.defaultBlockState(), 2 or 16)
+            level.setBlock(BlockPos(x, ground - 1, z), Blocks.GRASS_BLOCK.defaultBlockState(), 2 or 16)
+            for (y in ground..ground + 20) level.setBlock(BlockPos(x, y, z), Blocks.AIR.defaultBlockState(), 2 or 16)
+        }
+        Theme.entries.forEachIndexed { row, theme ->
+            kinds.forEachIndexed { col, kind ->
+                val (w, d) = Designs.defaultSize(kind)
+                val x0 = origin.x + col * GALLERY_COL
+                val z0 = origin.z + row * GALLERY_ROW
+                val layout = Designs.place(Designs.generate(kind, theme, w, d, templates.seed(x0, z0)), 0, x0, ground - 1, z0)
+                for (p in Designs.settle(layout, theme, ground - 1) { _, _ -> ground - 1 }) {
+                    level.setBlock(p.pos, p.state, 2 or 16)
+                    placed++
+                }
+            }
+        }
+        return Outcome.ok("설계 ${kinds.size}종 × 양식 ${Theme.entries.size}개를 지었다 (블록 ${placed}개). 가로: ${kinds.joinToString { it.label }} / 세로: ${Theme.entries.joinToString { it.label }}")
+    }
+
+    /**
+     * Admin: builds one design settled on the real terrain exactly as a work order would place it. With [slope] it first
+     * looks within 64 blocks for a dry lot whose ground varies by 3 to 6 blocks, to show how buildings sit on hillsides.
+     */
+    fun showcase(kind: BuildingKind, at: BlockPos, slope: Boolean = false): Outcome {
+        var origin = at
+        if (slope) {
+            val (w, d) = Designs.defaultSize(kind)
+            var found: BlockPos? = null
+            search@ for (r in 0..64 step 4) for (dx in -r..r step 4) for (dz in -r..r step 4) {
+                if (maxOf(kotlin.math.abs(dx), kotlin.math.abs(dz)) != r) continue
+                val x0 = at.x + dx
+                val z0 = at.z + dz
+                if (!BlockClass.loaded(level, Box(x0, 0, z0, x0 + w - 1, 0, z0 + d - 1))) continue
+                if (BlockClass.waterRatio(level, x0, z0, x0 + w - 1, z0 + d - 1) > 0) continue
+                val hs = (x0 until x0 + w step 2).flatMap { x -> (z0 until z0 + d step 2).mapNotNull { z -> templates.groundTop(level, x, z) } }
+                if (hs.isEmpty()) continue
+                val range = hs.max() - hs.min()
+                if (range in 3..6) {
+                    found = BlockPos(x0, hs.max(), z0)
+                    break@search
+                }
+            }
+            origin = found ?: return Outcome.fail("64칸 안에 알맞은 비탈이 없다.")
+        }
+        val theme = Theme.of(templates.styleAt(level, origin.x, origin.z))
+        val info = templates.find(Designs.id(kind, theme)) ?: return Outcome.fail("설계가 없다.")
+        val baseY = BlockClass.medianGround(level, origin.x, origin.z, origin.x + info.sizeX - 1, origin.z + info.sizeZ - 1)
+        val blocks = templates.blocks(level, info, 0, origin.x, baseY, origin.z)
+        for (p in blocks) level.setBlock(p.pos, p.state, 2 or 16)
+        com.grandstrategy.GrandStrategy.LOGGER.info("Showcase {} at {} {} {}", kind, origin.x, baseY, origin.z)
+        return Outcome.ok("${kind.label} (${theme.label}) 을(를) 지형에 맞춰 지었다: (${origin.x}, $baseY, ${origin.z}) 블록 ${blocks.size}개")
+    }
+
     fun autoBuild(nation: Nation, kind: BuildingKind): Outcome {
         if (activeOrders(nation.id) >= 2 + nation.claims.size / 20) return Outcome.fail("진행 중인 공사가 많다.")
         if (kind == BuildingKind.WALLS) {
@@ -250,9 +387,9 @@ class WorkManager(private val rt: Runtime) {
         if (options.isEmpty()) return Outcome.fail("${kind.label} 템플릿이 없다.")
         val picks = listOf(options[rt.sim.rng.nextInt(options.size)], options.minBy { it.sizeX * it.sizeZ }).distinct()
         for (info in picks) {
-            val rotation = rt.sim.rng.nextInt(4)
+            // The lot comes with the rotation that turns the front door to the street.
+            val (lot, rotation) = rt.roads.findLot(nation, info.sizeX, info.sizeZ) ?: continue
             val size = templates.footprint(info, rotation)
-            val lot = rt.roads.findLot(nation, size.x, size.z) ?: continue
             return place(nation, kind, info.id, rotation, Box(lot.minX, 0, lot.minZ, lot.maxX, size.y - 1, lot.maxZ), Int.MIN_VALUE, null, false)
         }
         rt.roads.wantFrontage(nation.id)
@@ -301,6 +438,13 @@ class WorkManager(private val rt: Runtime) {
                 }
             }
             credit[order.id] = if (order.pendingPlacement) 0.0 else allowance.coerceAtMost(rate * 40 + 1)
+            if (plan.cursor.toLong() != order.progress) stalled.remove(order.id)
+            else if (stalled.merge(order.id, 1, Int::plus)!! % 400 == 0) {
+                com.grandstrategy.GrandStrategy.LOGGER.warn(
+                    "Order #{} made no progress for {} ticks: rate {} credit {} cursor {}/{} budget {} scanned {}",
+                    order.id, stalled[order.id], "%.3f".format(rate), "%.2f".format(allowance), plan.cursor, plan.pos.size, budget, scanned
+                )
+            }
             order.progress = plan.cursor.toLong()
             if (plan.cursor >= plan.pos.size) complete(order, nation)
         }
@@ -364,10 +508,30 @@ class WorkManager(private val rt: Runtime) {
         val b = order.box
         when (order.type) {
             WorkType.BUILD -> {
+                if (order.clear) {
+                    // Renovation: take the old building down from the top before the new one goes up.
+                    for (y in b.maxY downTo b.minY - 1) for (x in b.minX..b.maxX) for (z in b.minZ..b.maxZ) add(x, y, z, REMOVE_CONSTRUCTED)
+                }
                 val baseY = if (order.baseY == Int.MIN_VALUE) BlockClass.medianGround(level, b.minX, b.minZ, b.maxX, b.maxZ) else order.baseY
-                for (x in b.minX..b.maxX) for (z in b.minZ..b.maxZ) {
-                    val ground = BlockClass.ground(level, x, z)
-                    for (y in ground until baseY) add(x, y, z, (if (y == baseY - 1) GRASS_ID else DIRT_ID) or FILL_FLAG)
+                // No levelling of the whole lot: designs bring their own foundations (Designs.settle), and vanilla
+                // templates get a foundation only under their own bottom layer, stone outside and earth inside.
+                val design = order.template?.let { Designs.parse(it) } != null
+                if (!design && order.kind != BuildingKind.WALLS) {
+                    templates.find(order.template)?.let { info ->
+                        val floor = templates.blocks(level, info, order.rotation, b.minX, baseY, b.minZ)
+                            .filter { it.pos.y == baseY && !it.state.isAir }.map { BlockPos.asLong(it.pos.x, 0, it.pos.z) }.toHashSet()
+                        for (key in floor) {
+                            val x = BlockPos.getX(key)
+                            val z = BlockPos.getZ(key)
+                            val edge = net.minecraft.core.Direction.Plane.HORIZONTAL.any { BlockPos.asLong(x + it.stepX, 0, z + it.stepZ) !in floor }
+                            for (y in BlockClass.ground(level, x, z) until baseY) add(x, y, z, (if (edge) COBBLE_ID else DIRT_ID) or FILL_FLAG)
+                        }
+                    }
+                } else if (order.kind == BuildingKind.WALLS) {
+                    for (x in b.minX..b.maxX) for (z in b.minZ..b.maxZ) {
+                        if (x != b.minX && x != b.maxX && z != b.minZ && z != b.maxZ) continue
+                        for (y in BlockClass.ground(level, x, z) until baseY) add(x, y, z, BRICK_ID or FILL_FLAG)
+                    }
                 }
                 if (order.kind == BuildingKind.WALLS) {
                     for (x in b.minX..b.maxX) for (z in b.minZ..b.maxZ) {
@@ -378,7 +542,7 @@ class WorkManager(private val rt: Runtime) {
                     }
                     state.buildings[order.building]?.box = Box(b.minX, baseY, b.minZ, b.maxX, baseY + 3, b.maxZ)
                 } else {
-                    val info = templates.all.firstOrNull { it.id == order.template }
+                    val info = templates.find(order.template)
                     if (info != null) {
                         val blocks = templates.blocks(level, info, order.rotation, b.minX, baseY, b.minZ)
                         for (p in blocks) add(p.pos.x, p.pos.y, p.pos.z, Block.getId(p.state))

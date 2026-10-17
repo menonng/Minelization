@@ -86,8 +86,9 @@ class VillagePlanner(private val rt: Runtime, private val shownCheck: (Int) -> B
         return rt.state.nation(nation)?.capital?.let { (Chunks.x(it) * 16f + 8f) to (Chunks.z(it) * 16f + 8f) }
     }
 
+    /** Somewhere a player could see a villager appear: anywhere villagers are drawn (the display radius). */
     override fun visibleAt(x: Float, z: Float): Boolean {
-        val radius = rt.population.tuning.visibleRadius + 16.0
+        val radius = minOf(rt.population.tuning.displayChunks, rt.server.playerList.viewDistance) * 16.0 + 16.0
         val level = rt.server.overworld()
         return rt.server.playerList.players.any { p ->
             p.level() == level && (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) <= radius * radius
@@ -95,6 +96,8 @@ class VillagePlanner(private val rt: Runtime, private val shownCheck: (Int) -> B
     }
 
     override fun shown(i: Int): Boolean = shownCheck(i)
+
+    override fun allowed(nation: Int, x: Float, z: Float): Boolean = rt.zones.allowedAt(nation, x, z)
 
     private companion object {
         const val HOUSE_CAPACITY = 5

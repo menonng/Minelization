@@ -235,19 +235,27 @@ object RoadLots {
     /** How far (in blocks, from the footprint's edge) a road may be for a building to count as on the road. */
     const val REACH = 3
 
-    fun candidates(cell: Long, sizeX: Int, sizeZ: Int): List<Box> {
+    /**
+     * The four lots around a road cell for a design [width] across its front and [depth] deep, each paired with its side:
+     * 0 = east of the road, 1 = west, 2 = south, 3 = north. Lots beside a north-south road are turned, so their
+     * footprint is depth × width.
+     */
+    fun candidates(cell: Long, width: Int, depth: Int): List<Pair<Box, Int>> {
         val x = Chunks.x(cell)
         val z = Chunks.z(cell)
-        val ox = x - sizeX / 2
-        val oz = z - sizeZ / 2
         val gap = YARD + 1
+        val oz = z - width / 2
+        val ox = x - width / 2
         return listOf(
-            Box(x + gap, 0, oz, x + gap + sizeX - 1, 0, oz + sizeZ - 1),
-            Box(x - gap - sizeX + 1, 0, oz, x - gap, 0, oz + sizeZ - 1),
-            Box(ox, 0, z + gap, ox + sizeX - 1, 0, z + gap + sizeZ - 1),
-            Box(ox, 0, z - gap - sizeZ + 1, ox + sizeX - 1, 0, z - gap)
+            Box(x + gap, 0, oz, x + gap + depth - 1, 0, oz + width - 1) to 0,
+            Box(x - gap - depth + 1, 0, oz, x - gap, 0, oz + width - 1) to 1,
+            Box(ox, 0, z + gap, ox + width - 1, 0, z + gap + depth - 1) to 2,
+            Box(ox, 0, z - gap - depth + 1, ox + width - 1, 0, z - gap) to 3
         )
     }
+
+    /** Rotation (0..3 = none, 90° cw, 180°, 90° ccw) that turns a north-facing design toward the road on [side]. */
+    fun rotationFor(side: Int): Int = intArrayOf(3, 1, 0, 2)[side]
 
     fun find(
         cells: List<Long>,
@@ -256,7 +264,7 @@ object RoadLots {
         rng: kotlin.random.Random,
         valid: (Box) -> Boolean,
         tries: Int = 240
-    ): Box? {
+    ): Pair<Box, Int>? {
         if (cells.isEmpty()) return null
         val ordered = cells.map { c ->
             val dx = (Chunks.x(c) - hubX).toDouble()
@@ -265,8 +273,8 @@ object RoadLots {
         }.sortedBy { it.second }
         var checked = 0
         for ((cell, _) in ordered) {
-            for (box in candidates(cell, sizeX, sizeZ).shuffled(rng)) {
-                if (valid(box)) return box
+            for ((box, side) in candidates(cell, sizeX, sizeZ).shuffled(rng)) {
+                if (valid(box)) return box to rotationFor(side)
             }
             if (++checked >= tries) break
         }

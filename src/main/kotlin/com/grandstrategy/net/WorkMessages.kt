@@ -15,7 +15,11 @@ data class TemplateView(val index: Int, val name: String, val style: String, val
 data class ChunkView(val key: Long, val color: Int, val own: Boolean)
 
 @Serializable
-data class BuildingView(val id: Int, val box: Box, val kind: BuildingKind, val own: Boolean, val complete: Boolean, val owner: String = "", val detected: Boolean = false)
+data class BuildingView(
+    val id: Int, val box: Box, val kind: BuildingKind, val own: Boolean, val complete: Boolean, val owner: String = "", val detected: Boolean = false,
+    /** Village style at the building, and the rotation a renovation would use (front toward the road). */
+    val theme: String = "plains", val facing: Int = 0
+)
 
 @Serializable
 data class OrderView(val id: Int, val type: WorkType, val box: Box, val progress: Long, val total: Long, val crew: Int, val present: Int, val kind: BuildingKind? = null)
@@ -53,7 +57,9 @@ sealed class ToClient {
         val builders: Int,
         val idle: Int,
         /** Planned road cells near the player that are not paved yet; they count as road for the build check. */
-        val roads: List<Long> = emptyList()
+        val roads: List<Long> = emptyList(),
+        /** The nation may build on water (underwater-structures research done). */
+        val marine: Boolean = false
     ) : ToClient()
 
     @Serializable

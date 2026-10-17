@@ -205,6 +205,15 @@ object WorkMode {
             }
             if (hit != null) return "${hit.kind.label} #${hit.id}와 겹침"
         }
+        if ((tool == WorkTool.BUILD || tool == WorkTool.WALLS) && !i.marine) {
+            val level = Minecraft.getInstance().level
+            if (level != null) {
+                for (x in target.minX..target.maxX step 2) for (z in target.minZ..target.maxZ step 2) {
+                    val top = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, x, z) - 1
+                    if (!level.getBlockState(BlockPos(x, top, z)).fluidState.isEmpty) return "물 위 · 수중 구조물 연구 필요"
+                }
+            }
+        }
         if (tool == WorkTool.BUILD) {
             val planned = i.roads.toHashSet()
             val level = Minecraft.getInstance().level ?: return null

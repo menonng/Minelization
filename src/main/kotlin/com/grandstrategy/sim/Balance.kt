@@ -40,8 +40,18 @@ data class AgentTuning(
     val perPopulation: Double = 1.0,
     val max: Int = 30000,
     val spawnPerTurn: Int = 800,
+    /** Radius in which villagers are walked by A* (near tier). */
     val visibleRadius: Int = 48,
-    val maxVisiblePerPlayer: Int = 150
+    /** Most A*-walked villagers per player. */
+    val maxVisiblePerPlayer: Int = 150,
+    /** Villagers are shown in every chunk the player sees, up to this many chunks out (also capped by view distance). */
+    val displayChunks: Int = 16,
+    val maxShownPerPlayer: Int = 4000,
+    /** Ticks between moves sent for far villagers, and for ones past 96 blocks. */
+    val farUpdateTicks: Int = 4,
+    val distantUpdateTicks: Int = 12,
+    /** New villagers spawned on a player's screen per view update (every 10 ticks), nearest first. */
+    val spawnsPerUpdate: Int = 600
 )
 
 @Serializable
