@@ -63,8 +63,6 @@ data class RoadTuning(
     val highwayRange: Int = 200,
     val streetNodes: Int = 12000,
     val highwayNodes: Int = 40000,
-    /** Construction tech levels where paving moves from dirt path to cobble, stone brick and concrete. */
-    val tierLevels: List<Int> = listOf(2, 4, 7),
     val workers: Int = 4
 )
 

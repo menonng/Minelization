@@ -38,6 +38,8 @@ interface AgentPlanner {
     fun home(nation: Int, rng: Random): Home? = null
     fun workSite(agents: Agents, i: Int, rng: Random): Pair<Float, Float>? = null
     fun meeting(nation: Int): Pair<Float, Float>? = null
+    /** A public place to spend social time (one of several), chosen per villager so a town doesn't crowd one square. */
+    fun meeting(nation: Int, rng: Random): Pair<Float, Float>? = meeting(nation)
     fun visibleAt(x: Float, z: Float): Boolean = false
     fun shown(i: Int): Boolean = false
     /** Whether a citizen of [nation] may stand at (x, z): its land plus one chunk around it. */
@@ -268,8 +270,10 @@ class Agents(initial: Int = 1024) {
                     timer[i] = 1f
                     return
                 }
-                val (mx, mz) = planner.meeting(nation[i]) ?: (homeX[i] to homeZ[i])
-                wander(i, mx, mz, 7f, AgentState.TO_SOCIAL, rng)
+                // A third head for a public place; the rest visit neighbours near home.
+                val public = if (rng.nextFloat() < 0.35f) planner.meeting(nation[i], rng) else null
+                if (public != null) wander(i, public.first, public.second, 10f, AgentState.TO_SOCIAL, rng)
+                else wander(i, homeX[i], homeZ[i], 9f, AgentState.TO_SOCIAL, rng)
             }
         }
     }

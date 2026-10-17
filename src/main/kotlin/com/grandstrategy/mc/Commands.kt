@@ -127,6 +127,34 @@ object GsCommands {
                 1
             }
             .then(literal("map").executes { ctx -> rt().map.open(ctx.source.playerOrException); 1 })
+            .then(literal("flag")
+                .executes { ctx ->
+                    val player = ctx.source.playerOrException
+                    val nation = rt().ruledNation(player) ?: return@executes reply(ctx, Outcome.fail("다스리는 나라가 없다."))
+                    val flag = FlagItems.fromStack(player.mainHandItem) ?: return@executes reply(ctx, Outcome.fail("국기로 삼을 배너를 손에 든다."))
+                    reply(ctx, rt().setFlag(nation, flag, player.gameProfile.name()))
+                }
+                .then(literal("random").executes { ctx ->
+                    val player = ctx.source.playerOrException
+                    val nation = rt().ruledNation(player) ?: return@executes reply(ctx, Outcome.fail("다스리는 나라가 없다."))
+                    reply(ctx, rt().setFlag(nation, com.grandstrategy.sim.Flags.random(rt().sim.rng.nextLong(), nation.color), player.gameProfile.name()))
+                }))
+            .then(literal("ideology").then(argument("id", StringArgumentType.word())
+                .suggests { _, b -> SharedSuggestionProvider.suggest(com.grandstrategy.sim.Content.config.ideologies.map { it.id }, b) }
+                .executes { ctx ->
+                    val player = ctx.source.playerOrException
+                    val nation = rt().ruledNation(player) ?: return@executes reply(ctx, Outcome.fail("다스리는 나라가 없다."))
+                    reply(ctx, com.grandstrategy.sim.Progress.choose(rt().sim, nation, StringArgumentType.getString(ctx, "id")))
+                }))
+            .then(literal("era").executes { ctx ->
+                val r = rt()
+                val c = com.grandstrategy.sim.Content.config
+                val text = r.state.alive().joinToString("\n") { n ->
+                    "${n.name}: ${c.era(n).name} 시대 (연구 합계 ${c.techTotal(n)}) · 무기 ${c.weapon(n).name} · 에너지 ${c.energySource(n).name} · " +
+                        "사상 ${c.ideologyOf(n)?.name ?: "없음"}" + c.wmds(n).takeIf { it.isNotEmpty() }?.let { w -> " · 대량살상무기 ${w.joinToString { it.name }}" }.orEmpty()
+                }
+                reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
+            })
             .then(literal("chest").executes { ctx -> NationScreen(ctx.source.playerOrException, rt()).open(); 1 })
             .then(literal("menu").then(argument("page", StringArgumentType.word())
                 .suggests { _, b -> SharedSuggestionProvider.suggest(listOf("overview", "map", "diplomacy", "research", "log"), b) }
@@ -402,6 +430,8 @@ object GsCommands {
             }))
         .then(literal("reload").executes { ctx ->
             val result = BalanceFile.reload()
+            val content = ContentFile.reload()
+            ctx.source.sendSystemMessage(Texts.outcome(Outcome(content.ok, content.message)))
             var text = Texts.outcome(Outcome(result.ok, result.message)).copy()
             for (line in result.changed.take(12)) text = text.append(Texts.plain("\n  $line"))
             if (result.changed.size > 12) text = text.append(Texts.plain("\n  … 외 ${result.changed.size - 12}개"))

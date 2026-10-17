@@ -221,7 +221,7 @@ class MapTileStore(private val rt: Runtime) {
         val level = rt.server.overworld()
         val border = level.worldBorder
         val nations = rt.state.alive().map { n ->
-            MapNation(n.id, n.name, Texts.dye(n).textColor, n.color, n.capital, n.claims.size)
+            MapNation(n.id, n.name, Texts.dye(n).textColor, n.color, n.capital, n.claims.size, n.flag)
         }
         val towns = rt.state.settlements.values.map { MapTown(it.id, it.name, it.center, it.owner ?: 0) }
         val players = rt.server.playerList.players.filter { it.level() == level }.map {

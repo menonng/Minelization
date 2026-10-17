@@ -109,22 +109,72 @@ class WorldHooks(private val runtime: Runtime) {
     private fun markers() {
         if (!runtime.settings.capitalMarkers) return
         for (nation in runtime.state.alive()) {
-            if (nation.markerPlaced) continue
+            if (nation.markerPlaced) {
+                if (nation.markerPos == null) relocateMarker(nation)
+                // No banner to be found (built over, or never placed): put up a new one.
+                if (nation.markerPos == Long.MIN_VALUE) nation.markerPlaced = false else continue
+            }
             val cx = Chunks.x(nation.capital)
             val cz = Chunks.z(nation.capital)
             if (!level.chunkSource.hasChunk(cx, cz)) continue
             nation.markerPlaced = true
-            val x = cx * 16 + 8
-            val z = cz * 16 + 8
-            val pos = BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z), z)
-            val current = level.getBlockState(pos)
-            if (!(current.isAir || current.`is`(BlockTags.REPLACEABLE)) || !level.getBlockState(pos.below()).isSolid) {
-                GrandStrategy.LOGGER.info("Skipped capital banner of {}: no free ground at {}", nation.name, pos)
+            // The capital centre, or the nearest free spot within 6 blocks (usually on the plaza).
+            val pos = markerSpot(cx * 16 + 8, cz * 16 + 8)
+            if (pos == null) {
+                GrandStrategy.LOGGER.info("Skipped capital banner of {}: no free ground near the capital", nation.name)
+                nation.markerPos = -1L
                 continue
             }
-            val banner = Blocks.BANNER.pick(Texts.dye(nation))
-            level.setBlockAndUpdate(pos, banner.defaultBlockState())
+            nation.markerPos = pos.asLong()
+            drawFlag(nation)
             GrandStrategy.LOGGER.info("Placed capital banner of {} at {}", nation.name, pos)
+        }
+    }
+
+    private fun markerSpot(x0: Int, z0: Int): BlockPos? {
+        val boxes = runtime.state.buildings.values.map { it.box }
+        for (r in 0..6) for (dx in -r..r) for (dz in -r..r) {
+            if (maxOf(kotlin.math.abs(dx), kotlin.math.abs(dz)) != r) continue
+            val x = x0 + dx
+            val z = z0 + dz
+            if (boxes.any { x in it.minX..it.maxX && z in it.minZ..it.maxZ }) continue
+            val pos = BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z), z)
+            val current = level.getBlockState(pos)
+            if ((current.isAir || current.`is`(BlockTags.REPLACEABLE)) && level.getBlockState(pos.below()).isSolid) return pos
+        }
+        return null
+    }
+
+    /** Saves from before flags kept no banner position: find the banner at the capital centre once and draw the flag on it. */
+    private fun relocateMarker(nation: com.grandstrategy.sim.Nation) {
+        val x = Chunks.x(nation.capital) * 16 + 8
+        val z = Chunks.z(nation.capital) * 16 + 8
+        if (!level.chunkSource.hasChunk(x shr 4, z shr 4)) return
+        val top = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z)
+        for (y in top downTo top - 12) {
+            val pos = BlockPos(x, y, z)
+            if (level.getBlockState(pos).block is net.minecraft.world.level.block.BannerBlock) {
+                nation.markerPos = pos.asLong()
+                drawFlag(nation)
+                return
+            }
+        }
+        nation.markerPos = Long.MIN_VALUE
+    }
+
+    /** Puts the nation's flag on its capital banner (colour of the cloth and every pattern layer). */
+    fun drawFlag(nation: com.grandstrategy.sim.Nation) {
+        val pos = BlockPos.of(nation.markerPos?.takeIf { it != Long.MIN_VALUE && it != -1L } ?: return)
+        if (!level.chunkSource.hasChunk(pos.x shr 4, pos.z shr 4)) return
+        val current = level.getBlockState(pos)
+        if (!current.isAir && current.block !is net.minecraft.world.level.block.BannerBlock) return
+        val stack = com.grandstrategy.mc.FlagItems.stack(nation.flag, nation.color, level.registryAccess())
+        val base = (stack.item as net.minecraft.world.item.BannerItem).color
+        level.setBlockAndUpdate(pos, Blocks.BANNER.pick(base).defaultBlockState())
+        level.getBlockEntity(pos)?.let {
+            it.applyComponentsFromItemStack(stack)
+            it.setChanged()
+            level.sendBlockUpdated(pos, it.blockState, it.blockState, 3)
         }
     }
 

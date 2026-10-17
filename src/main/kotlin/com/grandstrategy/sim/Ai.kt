@@ -117,7 +117,17 @@ object Ai {
             Posture.WAR, Posture.ARM -> if (nation.level(TechBranch.MILITARY) <= nation.level(TechBranch.CONSTRUCTION)) TechBranch.MILITARY else TechBranch.CONSTRUCTION
             Posture.CONSOLIDATE -> if ((view.pressure[Resource.FOOD] ?: 0.0) > 0.5) TechBranch.AGRICULTURE else TechBranch.ADMINISTRATION
             Posture.EXPAND -> if (nation.level(TechBranch.LOGISTICS) <= nation.level(TechBranch.ADMINISTRATION)) TechBranch.LOGISTICS else TechBranch.ADMINISTRATION
-            Posture.GROW -> listOf(TechBranch.EDUCATION, TechBranch.AGRICULTURE, TechBranch.MINING, TechBranch.INDUSTRY).minBy { nation.level(it) }
+            // Peacetime: bring up the least developed branch, so a nation's weapons, buildings and roads keep pace with
+            // its era. Aggressive rulers lean on the army; underwater building comes slowest.
+            Posture.GROW -> TechBranch.entries.minBy { b ->
+                val weight = when (b) {
+                    TechBranch.MILITARY -> 1.3 - 0.6 * nation.personality.aggression
+                    TechBranch.MARINE -> 2.0
+                    TechBranch.ADMINISTRATION, TechBranch.LOGISTICS -> 1.1
+                    else -> 1.0
+                }
+                (nation.level(b) + 1) * weight
+            }
         }
         if (nation.researchFocus != branch && nation.researchProgress < Balance.techCost(nation.level(nation.researchFocus)) * 0.5) {
             nation.researchFocus = branch

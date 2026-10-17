@@ -30,6 +30,7 @@ object GrandStrategy : ModInitializer {
 
     override fun onInitialize() {
         BalanceFile.loadAtStartup()
+        com.grandstrategy.mc.ContentFile.loadAtStartup()
         PayloadTypeRegistry.clientboundPlay().register(PlayCutscenePayload.TYPE, PlayCutscenePayload.CODEC)
         PayloadTypeRegistry.serverboundPlay().register(CutsceneDonePayload.TYPE, CutsceneDonePayload.CODEC)
         PayloadTypeRegistry.serverboundPlay().register(ClientMessagePayload.TYPE, ClientMessagePayload.CODEC)

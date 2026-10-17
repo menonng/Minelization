@@ -126,6 +126,21 @@ class Runtime(val server: MinecraftServer, save: SaveFile?) {
 
     fun ruledNation(player: ServerPlayer): Nation? = state.rulerNation(player.uuid.toString())
 
+    /** Changes a nation's flag everywhere it is shown (capital banner now; menus and the map on their next refresh). */
+    fun setFlag(nation: Nation, flag: com.grandstrategy.sim.Flag, by: String): com.grandstrategy.sim.Outcome {
+        nation.flag = flag
+        hooks.drawFlag(nation)
+        sim.log(com.grandstrategy.sim.EventKind.DIPLOMACY, "${nation.name}이(가) 새 국기를 내걸었다 ($by)", nation.id)
+        return com.grandstrategy.sim.Outcome.ok("국기를 바꿨다 (무늬 ${flag.layers.size}겹).")
+    }
+
+    /** A banner from the player's own inventory slot becomes the flag; the banner stays with the player. */
+    fun flagFromSlot(player: ServerPlayer, nation: Nation, slot: Int): com.grandstrategy.sim.Outcome {
+        val stack = if (slot in 0 until player.inventory.containerSize) player.inventory.getItem(slot) else net.minecraft.world.item.ItemStack.EMPTY
+        val flag = FlagItems.fromStack(stack) ?: return com.grandstrategy.sim.Outcome.fail("배너가 아니다.")
+        return setFlag(nation, flag, player.gameProfile.name())
+    }
+
     private fun dispatch(event: GameEvent) {
         val players = server.playerList.players
         for (player in players) {

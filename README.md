@@ -60,6 +60,7 @@
 | `/gs setup [크기] [미리생성] [조물주]` · `/gs admin pregen status|cancel` | 세계 준비 (OP) |
 | `/gs mode spectator|adventure` | 조물주 모드에서 관전/모험 전환 |
 | `/gs menu <탭>` · `/gs chest` | 나라 메뉴 탭 바로 열기 / 상자 메뉴 |
+| `/gs flag [random]` · `/gs ideology <id>` · `/gs era` | 손에 든 배너를 국기로 / 사상 고르기 / 모든 나라의 시대·무기·에너지·사상 |
 | `/gs admin designs` · `/gs admin design <용도> [slope]` | 설계 전시장 / 지형에 맞춰 하나 짓기 (OP) |
 | `/gs map` · `/gs admin map rebuild` | 전체 화면 세계 지도 (`M` 키) / 지도 타일 처음부터 다시 그리기 (OP) |
 | `/gs admin speed <틱>` · `pause` · `resume` · `step [턴]` · `seed <수>` · `perf` · `save` · `reload` | 관리 (OP) |
@@ -97,6 +98,10 @@
 ## 마을 길
 
 길은 저절로 생긴다: 수도 광장 → 건물마다 골목길 → 도시 사이 간선 도로 → 집 지을 자리가 모자라면 새 길. 건물은 길 3칸 안에만 지을 수 있다(성벽 제외). 작업 지정 모드의 `길` 도구로 직접 깔거나 걷어낼 수 있고, 걷어낸 자리는 자동으로 다시 깔지 않는다. 짓는 중인 건물에는 공사 현장 표시(기둥·테이프·고깔·진행률 글자판)가 뜬다. 자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.9.
+
+## 국기와 시대
+
+나라마다 배너 국기가 있다(처음엔 무작위). 나라 메뉴의 **국기** 탭에서 가방 속 배너를 국기 칸으로 끌어다 놓으면 바뀌고, 수도 광장 깃발·메뉴·세계 지도에 같은 무늬로 나온다. 시대(석기 → 항성 13단계), 기술, 무기(대량살상무기 포함), 에너지, 사상은 모두 `config/grandstrategy/content.json`에 데이터로 있고 `/gs admin reload`로 바로 바뀐다. 무기는 전투력, 에너지는 생산, 사상은 안정·성장·연구·군사·생산에 효과가 있고, 길 포장도 시대를 따른다. 나라 메뉴 **시대** 탭에서 확인하고 사상을 고른다. 자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.12.
 
 ## 건물 설계
 

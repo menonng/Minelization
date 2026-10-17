@@ -129,6 +129,9 @@ class MenuService(private val rt: Runtime) {
             "policy" -> enumOf<Policy>(m.a)?.let { Actions.execute(sim, nation, Action.SetPolicy(it)) } ?: Outcome.fail("정책 이름 오류")
             "research" -> enumOf<TechBranch>(m.a)?.let { Actions.execute(sim, nation, Action.Research(it)) } ?: Outcome.fail("분야 이름 오류")
             "build" -> enumOf<Facility>(m.a)?.let { Actions.execute(sim, nation, Action.Build(it)) } ?: Outcome.fail("시설 이름 오류")
+            "ideology" -> com.grandstrategy.sim.Progress.choose(sim, nation, m.a)
+            "flag_slot" -> rt.flagFromSlot(player, nation, m.a.toIntOrNull() ?: -1)
+            "flag_random" -> rt.setFlag(nation, com.grandstrategy.sim.Flags.random(sim.rng.nextLong(), nation.color), player.gameProfile.name())
             "auto" -> {
                 nation.autoGovern = !nation.autoGovern
                 Outcome.ok("자동 통치 ${if (nation.autoGovern) "켬" else "끔"}")
@@ -156,6 +159,7 @@ class MenuService(private val rt: Runtime) {
         val state = rt.state
         val mine = rt.citizenNation(player)
         val ruler = mine != null && mine.ruler == player.uuid.toString()
+        val content = com.grandstrategy.sim.Content.config
         val card = mine?.let { n ->
             NationCard(
                 id = n.id, name = n.name, color = Texts.dye(n).textColor, dye = n.color, ruler = n.rulerName ?: "AI",
@@ -165,7 +169,10 @@ class MenuService(private val rt: Runtime) {
                 researchFocus = n.researchFocus, researchProgress = n.researchProgress, researchCost = Balance.techCost(n.level(n.researchFocus)),
                 science = n.lastScience, tech = n.tech.toMap(), facilities = n.facilities.toMap(), stock = n.stock.toMap(),
                 income = n.lastIncome.toMap(), storage = Balance.storageCap(n), claimCost = Balance.claimCost(n),
-                recruitCost = Balance.recruitCost(n, 5), wars = state.warsOf(n.id).size
+                recruitCost = Balance.recruitCost(n, 5), wars = state.warsOf(n.id).size,
+                flag = n.flag, era = content.era(n).name, eraIndex = content.eraIndex(n), eraCount = content.eras.size,
+                techTotal = content.techTotal(n), nextEraAt = content.eras.getOrNull(content.eraIndex(n) + 1)?.techTotal ?: content.techTotal(n),
+                weapon = content.weapon(n).name, energy = content.energySource(n).name, ideology = content.ideologyOf(n)?.name ?: ""
             )
         }
         val nations = state.alive().filter { it.id != mine?.id }.map { n ->
@@ -176,7 +183,7 @@ class MenuService(private val rt: Runtime) {
                 population = n.population.toInt(), military = n.military.toInt(), strength = sim.strength(n), ruler = n.rulerName ?: "AI",
                 posture = n.posture, opinion = r?.opinion ?: 0.0, treaties = r?.treaties?.keys?.filter { r.has(it, state.turn) } ?: emptyList(),
                 atWar = war != null, warScore = mine?.let { war?.scoreFor(it.id) } ?: 0.0, exhaustion = mine?.let { war?.exhaustionOf(it.id) } ?: 0.0,
-                border = mine?.let { sim.borderLength(it.id, n.id) } ?: 0
+                border = mine?.let { sim.borderLength(it.id, n.id) } ?: 0, flag = n.flag
             )
         }.sortedWith(compareByDescending<NationRow> { it.atWar }.thenByDescending { it.border }.thenByDescending { it.claims })
         val towns = mine?.let { n ->
@@ -218,7 +225,49 @@ class MenuService(private val rt: Runtime) {
         return MenuView(
             open = opening, page = page, turn = state.turn, ruler = ruler, nation = card, nations = ownerRows.filter { it.id != card?.id } + listOfNotNull(ownerRows.firstOrNull { it.id == card?.id }),
             towns = towns, mapCenter = here, mapRadiusX = rx, mapRadiusZ = rz, tiles = tiles, events = events, proposals = proposals,
-            here = here, foundError = if (mine == null) sim.foundingError(here) else null
+            here = here, foundError = if (mine == null) sim.foundingError(here) else null,
+            content = if (page == "era" && mine != null) contentView(mine) else null
+        )
+    }
+
+    private fun need(r: com.grandstrategy.sim.Requirement): String {
+        val c = com.grandstrategy.sim.Content.config
+        val parts = ArrayList<String>()
+        r.era?.let { id -> c.eras.firstOrNull { it.id == id }?.let { parts += it.name } }
+        for ((b, l) in r.branches) parts += "${b.label} $l"
+        for (t in r.techs) c.techs.firstOrNull { it.id == t }?.let { parts += it.name }
+        return parts.joinToString(" · ").ifEmpty { "처음부터" }
+    }
+
+    private fun pct(v: Double) = (if (v >= 0) "+" else "") + "${(v * 100).toInt()}%"
+
+    /** Everything the era page lists, with what each needs and does. */
+    private fun contentView(n: com.grandstrategy.sim.Nation): com.grandstrategy.net.ContentView {
+        val c = com.grandstrategy.sim.Content.config
+        fun eraOf(r: com.grandstrategy.sim.Requirement) = c.eras.indexOfFirst { it.id == r.era }.coerceAtLeast(0)
+        val items = ArrayList<com.grandstrategy.net.UnlockRow>()
+        for (t in c.techs) items += com.grandstrategy.net.UnlockRow("tech", t.id, t.name, eraOf(t.requires), c.met(t.requires, n), "", need(t.requires), t.description)
+        for (w in c.weapons) {
+            val value = if (w.wmd != null) "대량살상 · 오염 ${w.wmd!!.radius}청크 · 인구 -${(w.wmd!!.populationLoss * 100).toInt()}%" else "전투력 ×${"%.1f".format(w.attack)}"
+            items += com.grandstrategy.net.UnlockRow(if (w.wmd != null) "wmd" else "weapon", w.id, w.name, eraOf(w.requires), c.met(w.requires, n), value, need(w.requires),
+                w.wmd?.description ?: w.description)
+        }
+        for (e in c.energy) {
+            val value = "생산 ×${"%.2f".format(e.output)}" + if (e.pollution > 0) " · 오염 안정 -${e.pollution.toInt()}" else ""
+            items += com.grandstrategy.net.UnlockRow("energy", e.id, e.name, eraOf(e.requires), c.met(e.requires, n), value, need(e.requires), e.description)
+        }
+        for (d in c.ideologies) {
+            val effects = listOfNotNull(
+                d.stability.takeIf { it != 0.0 }?.let { "안정 ${if (it > 0) "+" else ""}${it.toInt()}" },
+                d.growth.takeIf { it != 0.0 }?.let { "성장 ${pct(it)}" },
+                d.science.takeIf { it != 0.0 }?.let { "연구 ${pct(it)}" },
+                d.military.takeIf { it != 0.0 }?.let { "군사 ${pct(it)}" },
+                d.production.takeIf { it != 0.0 }?.let { "생산 ${pct(it)}" }
+            ).joinToString(" · ")
+            items += com.grandstrategy.net.UnlockRow("ideology", d.id, d.name, eraOf(d.requires), c.met(d.requires, n), effects, need(d.requires), d.description)
+        }
+        return com.grandstrategy.net.ContentView(
+            c.eras.map { com.grandstrategy.net.EraRow(it.id, it.name, it.techTotal, it.description) }, c.eraIndex(n), c.techTotal(n), items, n.ideology
         )
     }
 

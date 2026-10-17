@@ -568,7 +568,7 @@ class WorkManager(private val rt: Runtime) {
             WorkType.ROAD -> {
                 val road = state.roads[order.road]
                 if (road != null) {
-                    val tier = RoadBlocks.tier(state.nation(order.nation))
+                    val era = RoadBlocks.era(state.nation(order.nation))
                     // Walk the cells in order so the road visibly grows from one end.
                     for (c in road.cells) {
                         val x = Chunks.x(c)
@@ -577,7 +577,7 @@ class WorkManager(private val rt: Runtime) {
                         add(x, y + 1, z, REMOVE_PLANT)
                         add(x, y + 2, z, REMOVE_PLANT)
                         val surface = level.getBlockState(BlockPos(x, y, z))
-                        val block = if (!surface.fluidState.isEmpty) RoadBlocks.bridge(tier) else RoadBlocks.surface(tier, road.kind, x, z)
+                        val block = if (!surface.fluidState.isEmpty) RoadBlocks.bridge(era) else RoadBlocks.surface(era, road.kind, x, z)
                         add(x, y, z, Block.getId(block) or PAVE_FLAG)
                     }
                 }

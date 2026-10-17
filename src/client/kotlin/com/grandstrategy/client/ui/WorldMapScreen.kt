@@ -423,7 +423,7 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
         }
         for (n in info.nations) {
             val (sx, sy) = toScreen(Chunks.x(n.capital) * 16 + 8.0, Chunks.z(n.capital) * 16 + 8.0)
-            icon(g, ItemStack(Items.BANNER.pick(DyeColor.byId(n.dye))), sx, sy, scale)
+            icon(g, NationMenu.flagOf(n.flag, n.dye), sx, sy, scale)
         }
     }
 

@@ -194,7 +194,14 @@ class Nation(
     var foundedTurn: Long = 0,
     var lastIncome: MutableMap<Resource, Double> = mutableMapOf(),
     var lastScience: Double = 0.0,
-    var markerPlaced: Boolean = false
+    var markerPlaced: Boolean = false,
+    /** Where the capital's flag banner stands, so it can be redrawn when the flag changes. */
+    var markerPos: Long? = null,
+    var flag: Flag? = null,
+    /** Chosen ideology id (see content.json), and the era last announced. */
+    var ideology: String? = null,
+    var era: String? = null,
+    var ideologyTurn: Long = 0
 ) {
     val aiControlled: Boolean get() = ruler == null || autoGovern
 

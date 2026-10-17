@@ -63,6 +63,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         rng = Random(state.seed xor (state.turn * 0x9E3779B97F4A7C15uL.toLong()))
         computeBorders()
         Economy.run(this)
+        Progress.run(this)
         Settlements.run(this)
         Diplomacy.run(this)
         Ai.run(this)
@@ -96,6 +97,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         if (nation.has(Resource.IRON) <= 0.0) s *= 0.8
         if (nation.has(Resource.FOOD) <= 0.0) s *= 0.6
         if (nation.policy == Policy.MILITARY) s *= 1.1
+        s *= Content.militaryFactor(nation)
         return s
     }
 
@@ -120,6 +122,8 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
             personality = Personality(rng.nextDouble(), rng.nextDouble(), rng.nextDouble()),
             foundedTurn = state.turn
         )
+        nation.flag = Flags.random(rng.nextLong(), chosen)
+        nation.era = Content.config.era(nation).id
         state.nations[nation.id] = nation
         for (other in state.alive()) {
             if (other.id != nation.id) state.relation(nation.id, other.id).opinion = rng.nextDouble(-15.0, 25.0)

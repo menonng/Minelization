@@ -65,6 +65,15 @@ object NationMenu {
 
     fun bannerOf(dye: Int): ItemStack = ItemStack(Items.BANNER.pick(DyeColor.byId(dye)))
 
+    private val flagCache = HashMap<Pair<com.grandstrategy.sim.Flag?, Int>, ItemStack>()
+
+    /** A banner item showing a nation's flag (falls back to a plain banner of its colour). */
+    fun flagOf(flag: com.grandstrategy.sim.Flag?, dye: Int): ItemStack {
+        val level = Minecraft.getInstance().level ?: return bannerOf(dye)
+        if (flagCache.size > 256) flagCache.clear()
+        return flagCache.getOrPut(flag to dye) { com.grandstrategy.mc.FlagItems.stack(flag, dye, level.registryAccess()) }
+    }
+
     fun techIcon(t: TechBranch): Item = when (t) {
         TechBranch.AGRICULTURE -> Items.WHEAT_SEEDS
         TechBranch.MINING -> Items.IRON_PICKAXE
@@ -124,6 +133,8 @@ object NationMenu {
 
 private val WHITE_FLAG: Item get() = Items.BANNER.white()
 
+private const val RESEARCH_CARD_H = 40
+
 class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("국가")) {
     private var page = view.page.ifEmpty { "overview" }
     private var selected: Int? = null
@@ -164,7 +175,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
 
     override fun init() {
         val tabs = listOf("overview" to ("국가" to Items.BELL), "map" to ("지도" to Items.FILLED_MAP), "diplomacy" to ("외교" to WHITE_FLAG),
-            "research" to ("연구" to Items.BOOKSHELF), "log" to ("기록" to Items.WRITABLE_BOOK))
+            "research" to ("연구" to Items.BOOKSHELF), "era" to ("시대" to Items.CLOCK), "flag" to ("국기" to Items.LOOM), "log" to ("기록" to Items.WRITABLE_BOOK))
         if (view.nation != null) {
             val tw = (panelW - 20) / tabs.size
             tabs.forEachIndexed { k, (id, meta) ->
@@ -190,7 +201,184 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
             "overview" -> buildOverview()
             "diplomacy" -> buildDiplomacy()
             "research" -> buildResearch()
+            "era" -> buildEra()
+            "flag" -> buildFlag()
         }
+    }
+
+    // ---- Era page: the ladder of ages, and what each age unlocks ----
+
+    private var eraKind = "weapon"
+    private val eraKinds = listOf("tech" to ("기술" to Items.BOOK), "weapon" to ("무기" to Items.IRON_SWORD),
+        "energy" to ("에너지" to Items.BLAZE_POWDER), "ideology" to ("사상" to Items.WRITABLE_BOOK))
+    private val eraX get() = cx + 124
+    private val eraW get() = cw - 124
+    private val eraListY get() = cy + 50
+
+    private fun buildEra() {
+        val bw = (eraW - 6) / eraKinds.size
+        eraKinds.forEachIndexed { k, (id, meta) ->
+            addRenderableWidget(IconButton(eraX + k * (bw + 2), cy + 26, bw, 18, Component.literal(meta.first), meta.second, { eraKind == id }) {
+                eraKind = id
+                scroll = 0
+                rebuildWidgets()
+            })
+        }
+    }
+
+    private fun eraRows(): List<com.grandstrategy.net.UnlockRow> {
+        val c = view.content ?: return emptyList()
+        return c.items.filter { if (eraKind == "weapon") it.kind == "weapon" || it.kind == "wmd" else it.kind == eraKind }
+    }
+
+    private fun drawEra(g: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        val n = view.nation ?: return
+        val c = view.content
+        if (c == null) {
+            ink(g, "불러오는 중…", cx, cy)
+            return
+        }
+        heading(g, "시대", cx, cy)
+        val rowH = ((ch - 30) / c.eras.size).coerceIn(9, 13)
+        c.eras.forEachIndexed { k, e ->
+            val y = cy + 14 + k * rowH
+            val current = k == c.eraIndex
+            val past = k < c.eraIndex
+            if (current) g.fill(cx - 2, y - 1, cx + 116, y + rowH - 1, Ui.argb(0xE8C252, 110))
+            g.fill(cx, y + rowH / 2 - 1, cx + 3, y + rowH / 2 + 1, Ui.argb(if (past || current) 0x8A5A1A else 0xB0A080))
+            ink(g, e.name, cx + 6, y + (rowH - 8) / 2, if (current) 0x3A1A00 else if (past) 0x6B5A44 else 0xA09070)
+            val need = "${e.techTotal}"
+            ink(g, need, cx + 112 - font.width(need), y + (rowH - 8) / 2, if (past || current) 0x8A6A3A else 0xB0A080)
+        }
+        val next = c.eras.getOrNull(c.eraIndex + 1)
+        val barY = cy + 16 + c.eras.size * rowH
+        if (next != null && barY + 8 < cy + ch) {
+            val prev = c.eras[c.eraIndex].techTotal
+            Ui.bar(g, cx, barY, 116, (c.techTotal - prev).toDouble() / (next.techTotal - prev).coerceAtLeast(1), 0x8A5AD0)
+        }
+        // Right side: the nation's current state, then the list for the chosen kind.
+        ink(g, "${n.era} 시대 · 연구 합계 ${n.techTotal}" + (next?.let { " / 다음 ${it.name} ${it.techTotal}" } ?: ""), eraX, cy, 0x5A3A16)
+        ink(g, "무기 ${n.weapon} · 에너지 ${n.energy} · 사상 ${n.ideology.ifEmpty { "없음" }}", eraX, cy + 12, 0x6B5A44)
+        val rows = eraRows()
+        val rh = 22
+        val visible = ((cy + ch - eraListY) / rh).coerceAtLeast(1)
+        rows.drop(scroll).take(visible).forEachIndexed { k, r ->
+            val y = eraListY + k * rh
+            val chosen = r.kind == "ideology" && r.id == c.ideology
+            val hover = mouseX in eraX until eraX + eraW && mouseY in y until y + rh - 2
+            g.fill(eraX, y, eraX + eraW, y + rh - 2, Ui.argb(if (chosen) 0xE8C252 else if (r.kind == "wmd") 0xA02A1A else 0x000000,
+                if (chosen) 100 else if (r.kind == "wmd") 30 else if (hover && r.unlocked) 40 else 18))
+            val icon = when (r.kind) {
+                "tech" -> Items.BOOK
+                "weapon" -> Items.IRON_SWORD
+                "wmd" -> Items.TNT
+                "energy" -> Items.BLAZE_POWDER
+                else -> Items.WRITABLE_BOOK
+            }
+            drawIcon(g, ItemStack(if (r.unlocked) icon else Items.BARRIER), eraX + 10, y + 10, 12)
+            val era = c.eras.getOrNull(r.era)?.name ?: ""
+            ink(g, "${r.name}  ", eraX + 20, y + 1, if (r.unlocked) Ui.INK else 0x9A8A70)
+            ink(g, era, eraX + 20 + font.width("${r.name}  "), y + 1, 0x8A6A3A)
+            val info = font.plainSubstrByWidth(if (r.unlocked) r.value else "필요: ${r.need}", eraW - 24)
+            ink(g, info, eraX + 20, y + 11, if (r.unlocked) 0x2E5A2E else 0x8A6A50)
+            if (hover) {
+                val tip = listOfNotNull(r.name, r.value.ifEmpty { null }, "필요: ${r.need}", r.detail.ifEmpty { null },
+                    if (r.kind == "ideology" && r.unlocked && view.ruler && !chosen) "클릭: 국가 사상으로 삼는다" else null).joinToString("\n")
+                g.setTooltipForNextFrame(font, font.split(Component.literal(tip), 220), mouseX, mouseY)
+            }
+        }
+        if (rows.size > visible) ink(g, "휠: ${scroll + 1}-${minOf(rows.size, scroll + visible)} / ${rows.size}", eraX + eraW - 70, cy + ch - 8, 0x8A6A3A)
+    }
+
+    // ---- Flag page: the flag, and banners from the player's own bag to drag onto it ----
+
+    private var dragSlot = -1
+    private var dragStack: ItemStack = ItemStack.EMPTY
+    private var dragX = 0.0
+    private var dragY = 0.0
+    private val flagFrameX get() = cx + 8
+    private val flagFrameY get() = cy + 16
+    private val flagFrameW = 84
+    private val flagFrameH = 120
+    private val bagX get() = cx + 112
+    private val bagY get() = cy + 58
+
+    private fun bannerSlots(): List<Pair<Int, ItemStack>> {
+        val inv = Minecraft.getInstance().player?.inventory ?: return emptyList()
+        return (0 until inv.containerSize).mapNotNull { i -> inv.getItem(i).takeIf { it.item is net.minecraft.world.item.BannerItem }?.let { i to it } }
+    }
+
+    private fun buildFlag() {
+        button(bagX, cy + ch - 24, 120, "무작위 국기", Items.LOOM, "국가색 바탕에 무늬를 무작위로 새로 짠다", view.ruler) { NationMenu.act("flag_random") }
+    }
+
+    private fun bagSlotAt(mx: Double, my: Double): Pair<Int, ItemStack>? {
+        val perRow = ((cw - 112) / 20).coerceAtLeast(1)
+        bannerSlots().forEachIndexed { k, entry ->
+            val x = bagX + (k % perRow) * 20
+            val y = bagY + (k / perRow) * 20
+            if (mx >= x && mx < x + 18 && my >= y && my < y + 18) return entry
+        }
+        return null
+    }
+
+    private fun overFlag(mx: Double, my: Double) = mx >= flagFrameX && mx < flagFrameX + flagFrameW && my >= flagFrameY && my < flagFrameY + flagFrameH
+
+    private fun drawFlag(g: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        val n = view.nation ?: return
+        heading(g, "국기", cx, cy)
+        val hot = dragSlot >= 0 && overFlag(mouseX.toDouble(), mouseY.toDouble())
+        g.fill(flagFrameX - 3, flagFrameY - 3, flagFrameX + flagFrameW + 3, flagFrameY + flagFrameH + 3, Ui.argb(if (hot) 0xF0D060 else 0xB08A4A))
+        g.fillGradient(flagFrameX, flagFrameY, flagFrameX + flagFrameW, flagFrameY + flagFrameH, Ui.argb(0x3A4A5A), Ui.argb(0x1A2028))
+        val pose = g.pose()
+        pose.pushMatrix()
+        pose.translate((flagFrameX + flagFrameW / 2 - 40).toFloat(), (flagFrameY + flagFrameH / 2 - 40).toFloat())
+        pose.scale(5f, 5f)
+        g.item(NationMenu.flagOf(if (hot) com.grandstrategy.mc.FlagItems.fromStack(dragStack) else n.flag, n.dye), 0, 0)
+        pose.popMatrix()
+        ink(g, if (hot) "놓으면 이 무늬가 국기가 된다" else "${n.name}의 국기", flagFrameX - 2, flagFrameY + flagFrameH + 6, 0x5A3A16)
+        heading(g, "가방의 배너", bagX, cy)
+        val lines = font.split(Component.literal(
+            if (view.ruler) "베틀에서 만든 배너를 왼쪽 국기 칸으로 끌어다 놓으면 그 무늬가 국기가 된다. 배너는 가방에 그대로 남는다."
+            else "국기는 통치자만 바꿀 수 있다."
+        ), cw - 112)
+        lines.take(3).forEachIndexed { k, line -> g.text(font, line, bagX, cy + 14 + k * 10, Ui.argb(0x6B5A44), false) }
+        val banners = bannerSlots()
+        val perRow = ((cw - 112) / 20).coerceAtLeast(1)
+        banners.forEachIndexed { k, (slot, stack) ->
+            val x = bagX + (k % perRow) * 20
+            val y = bagY + (k / perRow) * 20
+            g.fill(x, y, x + 18, y + 18, Ui.argb(0x000000, if (slot == dragSlot) 90 else 40))
+            if (slot != dragSlot) g.item(stack, x + 1, y + 1)
+        }
+        if (banners.isEmpty()) ink(g, "가방에 배너가 없다 (모험 모드로 베틀에서 만들 수 있다)", bagX, bagY + 4, 0x9A6A4A)
+        if (dragSlot >= 0) {
+            val pose2 = g.pose()
+            pose2.pushMatrix()
+            pose2.translate((dragX - 12).toFloat(), (dragY - 12).toFloat())
+            pose2.scale(1.5f, 1.5f)
+            g.item(dragStack, 0, 0)
+            pose2.popMatrix()
+        }
+    }
+
+    override fun mouseDragged(event: net.minecraft.client.input.MouseButtonEvent, dx: Double, dy: Double): Boolean {
+        if (page == "flag" && dragSlot >= 0) {
+            dragX = event.x()
+            dragY = event.y()
+            return true
+        }
+        return super.mouseDragged(event, dx, dy)
+    }
+
+    override fun mouseReleased(event: net.minecraft.client.input.MouseButtonEvent): Boolean {
+        if (page == "flag" && dragSlot >= 0) {
+            if (overFlag(event.x(), event.y()) && view.ruler) NationMenu.act("flag_slot", dragSlot)
+            dragSlot = -1
+            dragStack = ItemStack.EMPTY
+            return true
+        }
+        return super.mouseReleased(event)
     }
 
     private fun button(x: Int, y: Int, w: Int, label: String, icon: Item?, tip: String? = null, enabled: Boolean = true, selectedCheck: () -> Boolean = { false }, action: () -> Unit) {
@@ -308,8 +496,27 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
                     }
                 }
             }
+            "flag" -> bagSlotAt(mx, my)?.let { (slot, stack) ->
+                if (!view.ruler) return true
+                dragSlot = slot
+                dragStack = stack.copy()
+                dragX = mx
+                dragY = my
+                return true
+            }
+            "era" -> {
+                val rh = 22
+                if (mx >= eraX && mx < eraX + eraW && my >= eraListY) {
+                    val k = ((my - eraListY) / rh).toInt() + scroll
+                    val r = eraRows().getOrNull(k)
+                    if (r != null && r.kind == "ideology" && r.unlocked && view.ruler && r.id != view.content?.ideology) {
+                        NationMenu.act("ideology", r.id)
+                        return true
+                    }
+                }
+            }
             "research" -> {
-                val (cardW, cardH) = (cw - 6) / 4 to 46
+                val (cardW, cardH) = (cw - 6) / 4 to RESEARCH_CARD_H
                 TechBranch.entries.forEachIndexed { k, t ->
                     val x = cx + (k % 4) * (cardW + 2)
                     val y = cy + 4 + (k / 4) * (cardH + 4)
@@ -327,6 +534,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         val max = when (page) {
             "diplomacy" -> (if (showTowns) view.towns.size else view.nations.size) - 6
             "log" -> view.events.size - 8
+            "era" -> eraRows().size - ((ch - (eraListY - cy)) / 22)
             else -> 0
         }.coerceAtLeast(0)
         scroll = (scroll - scrollY.toInt()).coerceIn(0, max)
@@ -338,7 +546,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         Ui.panel(g, left, top, panelW, panelH, parchment = true)
         val n = view.nation
         val title = if (n != null) "${n.name} · ${view.turn}턴 · 통치자 ${n.ruler}" else "나라 선택 · ${view.turn}턴"
-        Ui.ribbon(g, font, left + 10, top + 8, panelW - 70, n?.color ?: 0x8A6A3A, Component.literal(title), n?.let { NationMenu.bannerOf(it.dye) } ?: ItemStack(Items.MAP))
+        Ui.ribbon(g, font, left + 10, top + 8, panelW - 70, n?.color ?: 0x8A6A3A, Component.literal(title), n?.let { NationMenu.flagOf(it.flag, it.dye) } ?: ItemStack(Items.MAP))
     }
 
     override fun extractRenderState(g: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
@@ -348,6 +556,8 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
             "map" -> drawMap(g, mouseX, mouseY)
             "diplomacy" -> drawDiplomacy(g, mouseX, mouseY)
             "research" -> drawResearch(g, mouseX, mouseY)
+            "era" -> drawEra(g, mouseX, mouseY)
+            "flag" -> drawFlag(g, mouseX, mouseY)
             "log" -> drawLog(g)
         }
         if (NationMenu.toast.isNotEmpty() && System.currentTimeMillis() - NationMenu.toastAt < 4000) {
@@ -372,7 +582,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         heading(g, "이 세계의 나라들", cx, cy - 22)
         view.nations.take(7).forEachIndexed { k, n ->
             val y = cy + 18 + k * 22
-            g.item(NationMenu.bannerOf(n.dye), cx, y + 2)
+            g.item(NationMenu.flagOf(n.flag, n.dye), cx, y + 2)
             g.text(font, Component.literal(n.name), cx + 20, y + 2, Ui.argb(Ui.readable(n.color)), false)
             ink(g, "영토 ${n.claims} · 인구 ${n.population} · 병력 ${n.military} · ${n.ruler}", cx + 20, y + 11, 0x6B5A44)
         }
@@ -590,7 +800,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
 
     private fun drawResearch(g: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         val n = view.nation ?: return
-        val (cardW, cardH) = (cw - 6) / 4 to 46
+        val (cardW, cardH) = (cw - 6) / 4 to RESEARCH_CARD_H
         TechBranch.entries.forEachIndexed { k, t ->
             val x = cx + (k % 4) * (cardW + 2)
             val y = cy + 4 + (k / 4) * (cardH + 4)
@@ -604,11 +814,12 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
             ink(g, t.label, x + 24, y + 4)
             ink(g, "Lv ${n.tech[t] ?: 0}", x + 24, y + 14, 0x6B5A44)
             val effect = font.plainSubstrByWidth(t.effect, cardW - 6)
-            ink(g, effect, x + 3, y + 25, 0x5A4A34)
+            ink(g, effect, x + 3, y + 24, 0x5A4A34)
             if (focus) Ui.bar(g, x + 3, y + cardH - 11, cardW - 6, n.researchProgress / n.researchCost.coerceAtLeast(1.0), 0x8A5AD0)
             if (hover && !focus) g.setTooltipForNextFrame(font, Component.literal("${t.label}: 레벨당 ${t.effect} — 클릭: 연구"), mouseX, mouseY)
         }
-        heading(g, "연구 속도 ${NationMenu.number(n.science)}/턴 · 다음 단계까지 ${(n.researchCost - n.researchProgress).toInt()}", cx, cy + 108)
+        val rows = (TechBranch.entries.size + 3) / 4
+        heading(g, "연구 속도 ${NationMenu.number(n.science)}/턴 · 다음 단계까지 ${(n.researchCost - n.researchProgress).toInt()}", cx, cy + 6 + rows * (RESEARCH_CARD_H + 4))
         heading(g, "시설 (작업 지정 모드로 직접 지을 수도 있다)", cx, cy + ch - 34)
     }
 

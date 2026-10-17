@@ -70,15 +70,44 @@ class WorldRoadGround(private val level: ServerLevel, private val terrain: (Long
     }
 }
 
-/** Paving by era. Index = construction tier from [RoadTuning.tierLevels][com.grandstrategy.sim.RoadTuning.tierLevels]. */
+/**
+ * Road materials. Paving follows the nation's era as defined in content.json (dirt path in the stone age, cobble in
+ * classical times, concrete in the modern age...), so editing that file changes what new and repaved roads look like.
+ */
 object RoadBlocks {
-    private val PAVING = setOf(
+    private val LEGACY = setOf(
         Blocks.COBBLESTONE, Blocks.MOSSY_COBBLESTONE, Blocks.STONE_BRICKS, Blocks.CRACKED_STONE_BRICKS, Blocks.MOSSY_STONE_BRICKS,
-        Blocks.POLISHED_ANDESITE, Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.GRAY), Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.LIGHT_GRAY), Blocks.COARSE_DIRT
+        Blocks.POLISHED_ANDESITE, Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.GRAY),
+        Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.LIGHT_GRAY), Blocks.COARSE_DIRT
     )
-    private val BRIDGES = setOf(Blocks.OAK_PLANKS, Blocks.SPRUCE_PLANKS, Blocks.STONE_BRICKS, Blocks.SMOOTH_STONE)
+    private val LEGACY_BRIDGES = setOf(Blocks.OAK_PLANKS, Blocks.SPRUCE_PLANKS, Blocks.STONE_BRICKS, Blocks.SMOOTH_STONE)
 
-    fun paving(state: BlockState): Boolean = PAVING.any { state.`is`(it) }
+    /** Paving and bridge blocks of every era, rebuilt whenever the content is reloaded. */
+    private var cachedFor: com.grandstrategy.sim.ContentConfig? = null
+    private var pavingSet: Set<net.minecraft.world.level.block.Block> = LEGACY
+    private var bridgeSet: Set<net.minecraft.world.level.block.Block> = LEGACY_BRIDGES
+    private val byId = HashMap<String, BlockState>()
+
+    private fun refresh() {
+        val content = com.grandstrategy.sim.Content.config
+        if (cachedFor === content) return
+        cachedFor = content
+        byId.clear()
+        pavingSet = LEGACY + content.eras.flatMap { e -> e.road + listOfNotNull(e.plaza) }.mapNotNull { block(it)?.block }
+        bridgeSet = LEGACY_BRIDGES + content.eras.mapNotNull { block(it.bridge)?.block }
+    }
+
+    /** A block by id ("minecraft:stone_bricks"), or null if no such block exists. */
+    fun block(id: String): BlockState? = byId.getOrPut(id) {
+        val parsed = net.minecraft.resources.Identifier.tryParse(id) ?: return null
+        val b = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getOptional(parsed).orElse(null) ?: return null
+        b.defaultBlockState()
+    }
+
+    fun paving(state: BlockState): Boolean {
+        refresh()
+        return state.block in pavingSet
+    }
 
     /** Top block a road would replace: the motion-blocking surface, looking under snow layers. */
     fun groundY(level: ServerLevel, x: Int, z: Int): Int {
@@ -88,42 +117,30 @@ object RoadBlocks {
         return y
     }
 
-    fun bridge(state: BlockState): Boolean = BRIDGES.any { state.`is`(it) }
+    fun bridge(state: BlockState): Boolean {
+        refresh()
+        return state.block in bridgeSet
+    }
 
     /** Anything our roads (or vanilla village paths) are made of; villagers walk these more willingly. */
     fun road(state: BlockState): Boolean = state.`is`(Blocks.DIRT_PATH) || paving(state)
 
-    fun tier(nation: Nation?): Int {
-        val level = nation?.level(TechBranch.CONSTRUCTION) ?: 0
-        return Balance.config.roads.tierLevels.count { level >= it }
+    fun era(nation: Nation?): com.grandstrategy.sim.EraDef {
+        val content = com.grandstrategy.sim.Content.config
+        return nation?.let { content.era(it) } ?: content.eras.first()
     }
 
     /** Surface block for a column, varied by position so long roads look worn rather than printed. */
-    fun surface(tier: Int, kind: RoadKind, x: Int, z: Int): BlockState {
+    fun surface(era: com.grandstrategy.sim.EraDef, kind: RoadKind, x: Int, z: Int): BlockState {
         val r = ((x * 73856093) xor (z * 19349663)).let { (it xor (it ushr 13)) and 0xFF }
-        return when (tier) {
-            0 -> if (kind == RoadKind.PLAZA && r < 70) Blocks.COARSE_DIRT else Blocks.DIRT_PATH
-            1 -> when {
-                r < 150 -> Blocks.COBBLESTONE
-                r < 200 -> Blocks.MOSSY_COBBLESTONE
-                else -> Blocks.DIRT_PATH
-            }
-            2 -> when {
-                kind == RoadKind.PLAZA -> if (r < 200) Blocks.POLISHED_ANDESITE else Blocks.STONE_BRICKS
-                r < 190 -> Blocks.STONE_BRICKS
-                r < 225 -> Blocks.CRACKED_STONE_BRICKS
-                else -> Blocks.MOSSY_STONE_BRICKS
-            }
-            else -> if (kind == RoadKind.PLAZA) Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.LIGHT_GRAY) else Blocks.CONCRETE.pick(net.minecraft.world.item.DyeColor.GRAY)
-        }.defaultBlockState()
+        if (kind == RoadKind.PLAZA) era.plaza?.let { id -> if (r < 190) block(id)?.let { return it } }
+        val ids = era.road.ifEmpty { listOf("minecraft:dirt_path") }
+        // The first block covers about 70% of the road; the others share the rest.
+        val id = if (ids.size == 1 || r < 180) ids[0] else ids[1 + (r % (ids.size - 1))]
+        return block(id) ?: Blocks.DIRT_PATH.defaultBlockState()
     }
 
-    fun bridge(tier: Int): BlockState = when (tier) {
-        0 -> Blocks.OAK_PLANKS
-        1 -> Blocks.SPRUCE_PLANKS
-        2 -> Blocks.STONE_BRICKS
-        else -> Blocks.SMOOTH_STONE
-    }.defaultBlockState()
+    fun bridge(era: com.grandstrategy.sim.EraDef): BlockState = block(era.bridge) ?: Blocks.OAK_PLANKS.defaultBlockState()
 }
 
 /**
@@ -140,6 +157,9 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
     private val lastReason = HashMap<Int, String>()
     /** Nations whose builders found no free lot on the streets; the next plan opens a new street for them. */
     private val frontage = HashSet<Int>()
+    /** Era each nation was last seen in, and roads waiting to be repaved in a new era's material. */
+    private val lastEra = HashMap<Int, String>()
+    private val repaveQueue = HashMap<Int, ArrayDeque<Int>>()
     private var ticks = 0L
     private var cursor = 0
     var planned = 0
@@ -188,6 +208,22 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
             return false
         }
         if (pending(nation.id) >= tuning.maxPendingPerNation) return stop("공사 대기 중")
+        val era = com.grandstrategy.sim.Content.config.era(nation).id
+        val before = lastEra.put(nation.id, era)
+        if (before != null && before != era) {
+            repaveQueue[nation.id] = ArrayDeque(state.roads.values.filter { it.nation == nation.id && it.built }.map { it.id })
+        }
+        repaveQueue[nation.id]?.let { queue ->
+            while (queue.isNotEmpty()) {
+                val road = state.roads[queue.removeFirst()] ?: continue
+                if (state.orders.values.any { it.road == road.id }) continue
+                road.built = false
+                work.orderRoad(nation, road, null, false)
+                lastReason[nation.id] = "새 시대에 맞춰 길 다시 포장 (남은 ${queue.size}개)"
+                return true
+            }
+            repaveQueue.remove(nation.id)
+        }
         val ground = ground()
         val capitalX = Chunks.x(nation.capital) * 16 + 8
         val capitalZ = Chunks.z(nation.capital) * 16 + 8

@@ -80,6 +80,13 @@ class VillagePlanner(private val rt: Runtime, private val shownCheck: (Int) -> B
         else -> (b.minX + rng.nextFloat() * b.sizeX) to (b.maxZ + 2.5f)
     }
 
+    override fun meeting(nation: Int, rng: Random): Pair<Float, Float>? {
+        val places = buildings(nation, setOf(BuildingKind.TEMPLE, BuildingKind.MARKET))
+        val capital = rt.state.nation(nation)?.capital?.let { (Chunks.x(it) * 16f + 8f) to (Chunks.z(it) * 16f + 8f) }
+        val k = rng.nextInt(places.size + 1)
+        return if (k < places.size) ring(places[k].box, rng) else capital
+    }
+
     override fun meeting(nation: Int): Pair<Float, Float>? {
         val temple = buildings(nation, setOf(BuildingKind.TEMPLE, BuildingKind.MARKET)).firstOrNull()
         if (temple != null) return ring(temple.box, Random(nation))

@@ -40,8 +40,27 @@ data class NationCard(
     val storage: Double,
     val claimCost: Map<Resource, Double>,
     val recruitCost: Map<Resource, Double>,
-    val wars: Int
+    val wars: Int,
+    val flag: com.grandstrategy.sim.Flag? = null,
+    val era: String = "",
+    val eraIndex: Int = 0,
+    val eraCount: Int = 1,
+    val techTotal: Int = 0,
+    val nextEraAt: Int = 0,
+    val weapon: String = "",
+    val energy: String = "",
+    val ideology: String = ""
 )
+
+@Serializable
+data class EraRow(val id: String, val name: String, val techTotal: Int, val description: String)
+
+/** One unlockable thing for the era page: kind is tech, weapon, wmd, energy or ideology. */
+@Serializable
+data class UnlockRow(val kind: String, val id: String, val name: String, val era: Int, val unlocked: Boolean, val value: String, val need: String, val detail: String)
+
+@Serializable
+data class ContentView(val eras: List<EraRow>, val eraIndex: Int, val techTotal: Int, val items: List<UnlockRow>, val ideology: String?)
 
 @Serializable
 data class NationRow(
@@ -60,7 +79,8 @@ data class NationRow(
     val atWar: Boolean = false,
     val warScore: Double = 0.0,
     val exhaustion: Double = 0.0,
-    val border: Int = 0
+    val border: Int = 0,
+    val flag: com.grandstrategy.sim.Flag? = null
 )
 
 @Serializable
@@ -111,7 +131,8 @@ data class MenuView(
     val events: List<EventRow>,
     val proposals: List<ProposalRow>,
     val here: Long,
-    val foundError: String?
+    val foundError: String?,
+    val content: ContentView? = null
 ) : ToClient()
 
 object MapFlags {
@@ -136,7 +157,7 @@ data class SetupDone(val size: Int) : ToClient()
 data class MapTileData(val key: Long, val version: Int, val pixels: String?, val owners: List<Int>, val flags: List<Int>)
 
 @Serializable
-data class MapNation(val id: Int, val name: String, val color: Int, val dye: Int, val capital: Long, val claims: Int)
+data class MapNation(val id: Int, val name: String, val color: Int, val dye: Int, val capital: Long, val claims: Int, val flag: com.grandstrategy.sim.Flag? = null)
 
 @Serializable
 data class MapTown(val id: Int, val name: String, val center: Long, val owner: Int)
