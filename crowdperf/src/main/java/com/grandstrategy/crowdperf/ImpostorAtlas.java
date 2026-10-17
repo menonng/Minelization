@@ -18,14 +18,14 @@ import net.minecraft.server.packs.resources.ResourceManager;
 /**
  * One texture for the whole batch. A villager is a base skin plus biome and profession overlays drawn over the same
  * model with the same UV layout, so stacking the overlays onto the skin once, texel by texel, looks the same as
- * drawing three layers: each look (kind × biome × profession) becomes one 64×64 slot here, and every batched
+ * drawing up to four layers: each look (kind × biome × profession × level badge) becomes one 64×64 slot here, and every batched
  * villager is drawn in a single call with one texture.
  */
 final class ImpostorAtlas {
     static final Identifier ID = Identifier.fromNamespaceAndPath("crowdperf", "batch_atlas");
     static final int SLOT = 64;
-    static final int COLUMNS = 16;
-    static final int ROWS = 16;
+    static final int COLUMNS = 32;
+    static final int ROWS = 32;
     /** The entity shaders' alpha cutout (0.1). */
     private static final int CUTOUT = 26;
 

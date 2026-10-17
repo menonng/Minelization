@@ -6,10 +6,14 @@ public interface CrowdEntity {
 
     void crowdperf$setBatched(boolean batched);
 
-    /** Whether the entity is in the far batch (decided when that batch is rebuilt). */
-    boolean crowdperf$far();
+    /** Tick of the last position update from the server, and the average gap between updates (0 = unknown). */
+    int crowdperf$lastUpdate();
 
-    void crowdperf$setFar(boolean far);
+    void crowdperf$setLastUpdate(int tick);
+
+    float crowdperf$updateInterval();
+
+    void crowdperf$setUpdateInterval(float ticks);
 
     /** Packed light of the batched entity, cached until it moves to another block or the cache is renewed. */
     int crowdperf$light();

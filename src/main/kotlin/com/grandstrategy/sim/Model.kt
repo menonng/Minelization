@@ -205,7 +205,9 @@ class Nation(
     /** Carrying capacity as of the last turn, and an active production penalty from an overcrowding event. */
     var capacity: Double = 0.0,
     var crowdPenalty: Double = 0.0,
-    var crowdPenaltyTurns: Int = 0
+    var crowdPenaltyTurns: Int = 0,
+    /** Turn the capital last fell, so a lost capital is announced with a cutscene only once in a while. */
+    var capitalFellTurn: Long = -1000
 ) {
     val aiControlled: Boolean get() = ruler == null || autoGovern
 

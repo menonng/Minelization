@@ -7,12 +7,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.geom.EntityModelSet;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.core.BlockPos;
 import net.minecraft.client.resources.metadata.animation.VillagerMetadataSection;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.LightCoordsUtil;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.npc.villager.AbstractVillager;
 import net.minecraft.world.entity.npc.villager.Villager;
@@ -24,39 +24,51 @@ import net.minecraft.world.phys.Vec3;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * The crowd batch. Every tick, all villagers past {@link CrowdConfig#batchDistance} are written into one vertex buffer
- * on the GPU (their baked rest-pose mesh, turned to face where they walk, textured from {@link ImpostorAtlas}); each
- * frame that buffer is drawn with a single call. Vanilla instead extracts a render state, poses a model and builds
- * every cube of every villager anew each frame, which is what made a few thousand villagers slow.
+ * The crowd. Every tick, the villagers past {@link CrowdConfig#batchDistance} become GPU instances: 76 bytes each
+ * (where they were at the last two ticks, body and head yaw, walk cycle, look, light). The frame then draws them all
+ * with a handful of instanced calls ({@link CrowdRenderer}); the vertex shader interpolates them to the frame, swings
+ * their legs and turns their heads, so they move exactly as smoothly as normal villagers. Vanilla instead extracts a
+ * render state, poses a model and builds every cube of every villager anew each frame.
  * <p>
- * Batched villagers are flagged ({@link CrowdEntity}) so the normal entity pass skips them, and they only tick lightly
- * ({@code ClientLevelMixin}). Close villagers, and any villager that needs more than its rest pose (glowing, named,
- * hurt, dying, sleeping, riding, leashed, invisible), stay ordinary entities.
+ * Batched villagers are flagged ({@link CrowdEntity}) so the normal entity pass skips them, and they tick lightly
+ * ({@code ClientLevelMixin}). Close villagers, and any villager that needs more than the model and walk cycle
+ * (glowing, named, hurt, dying, sleeping, riding, leashed, invisible), stay ordinary entities.
  */
 public final class Impostors {
-    private static final int VERTEX_BYTES = ImpostorBatch.VERTEX_BYTES;
-    private static final int WHITE = 0xFFFFFFFF;
     private static final Identifier VILLAGER_SKIN = Identifier.withDefaultNamespace("textures/entity/villager/villager.png");
     private static final Identifier BABY_SKIN = Identifier.withDefaultNamespace("textures/entity/villager/villager_baby.png");
     private static final Identifier TRADER_SKIN = Identifier.withDefaultNamespace("textures/entity/wandering_trader/wandering_trader.png");
+    private static final String[] LEVELS = {"stone", "iron", "gold", "emerald", "diamond"};
+
+    /** Mesh kinds; each has a full and a low-detail group. */
+    private static final int VILLAGER = 0, BABY = 1, TRADER = 2, KINDS = 3;
 
     private static final ImpostorAtlas atlas = new ImpostorAtlas();
-    private static ImpostorMesh villagerMesh;
-    private static ImpostorMesh babyMesh;
-    private static ImpostorMesh traderMesh;
+    private static final CrowdRenderer renderer = new CrowdRenderer();
+    private static final CrowdRenderer.Group[] groups = new CrowdRenderer.Group[KINDS * 2];
+    @SuppressWarnings("unchecked")
+    private static final List<AbstractVillager>[] members = new List[KINDS * 2];
+    private static ImpostorMesh[] meshes;
+    private static int maxQuads;
 
-    /** Villagers between the batch distance and the far distance, rebuilt every tick. */
-    private static final ImpostorBatch near = new ImpostorBatch("near batch");
-    /** Villagers past the far distance: the server updates them rarely, so this is rebuilt every few ticks. */
-    private static final ImpostorBatch far = new ImpostorBatch("far batch");
+    static {
+        for (int i = 0; i < groups.length; i++) {
+            groups[i] = new CrowdRenderer.Group();
+            members[i] = new ArrayList<>();
+        }
+    }
+
     private static int ticks;
     private static boolean anyBatched;
     /** Bumped when the atlas is cleared, so cached slots are looked up again. */
     private static int generation;
 
-    // Stats for /crowdperf stats.
+    // Stats for /crowdperf.
     static int lastBatched;
-    static int lastQuads;
+    /** Villagers left to the normal renderer last tick: close, needing a special pose or look, or anything else. */
+    static int lastNear, lastSpecial, lastOther;
+    /** Batched but past the view distance, so not drawn. */
+    static int lastHidden;
     static long buildNanos;
     static int builds;
 
@@ -66,15 +78,15 @@ public final class Impostors {
         ClientLevel level = mc.level;
         CrowdConfig config = CrowdPerf.config();
         if (level == null) {
-            clearBatches();
+            clearGroups();
             return;
         }
-        if (!config.batch) {
+        if (!config.batch || renderer.broken()) {
             if (anyBatched) release(level);
-            clearBatches();
+            clearGroups();
             return;
         }
-        if (++ticks % Math.max(1, config.rebuildTicks) != 0) return;
+        ticks++;
         long start = System.nanoTime();
         rebuild(mc, level, config);
         buildNanos += System.nanoTime() - start;
@@ -88,17 +100,20 @@ public final class Impostors {
         lastBatched = 0;
     }
 
-    /** Forgets baked meshes and the atlas (after a resource reload or on leaving a world). */
+    /** Forgets baked meshes, GPU buffers and the atlas (after a resource reload or on leaving a world). */
     public static void reset() {
         atlas.clear();
         generation++;
-        villagerMesh = babyMesh = traderMesh = null;
-        clearBatches();
+        meshes = null;
+        renderer.close();
+        clearGroups();
     }
 
-    private static void clearBatches() {
-        near.clear();
-        far.clear();
+    private static void clearGroups() {
+        for (CrowdRenderer.Group g : groups) {
+            g.count = 0;
+            g.visible = 0;
+        }
     }
 
     private static void rebuild(Minecraft mc, ClientLevel level, CrowdConfig config) {
@@ -106,18 +121,14 @@ public final class Impostors {
         double enter = (config.batchDistance + 1.0) * (config.batchDistance + 1.0);
         double leave = (config.batchDistance - 1.0) * (config.batchDistance - 1.0);
         double low = config.lowDetailDistance * config.lowDetailDistance;
-        double farFrom = config.farDistance * config.farDistance;
         double view = mc.options.getEffectiveRenderDistance() * 16.0;
         double max = view * view;
         Entity camera = mc.getCameraEntity();
-        if (villagerMesh == null) bake(mc.getEntityModels());
-        // The far batch is rebuilt every few ticks; in between, villagers it holds stay in it (and are skipped here),
-        // so none is drawn twice or vanishes while crossing over.
-        boolean farTurn = ticks % Math.max(1, config.farRebuildTicks) == 0;
-        near.begin(cam);
-        if (farTurn) far.begin(cam);
+        if (meshes == null) bake(mc.getEntityModels());
 
+        for (List<AbstractVillager> list : members) list.clear();
         int batched = 0;
+        lastNear = lastSpecial = lastOther = lastHidden = 0;
         for (Entity entity : level.entitiesForRendering()) {
             CrowdEntity crowd = (CrowdEntity) entity;
             if (!(entity instanceof AbstractVillager villager)) {
@@ -128,42 +139,111 @@ public final class Impostors {
             double dy = entity.getY() - cam.y;
             double dz = entity.getZ() - cam.z;
             double d2 = dx * dx + dy * dy + dz * dz;
-            boolean want = d2 > (crowd.crowdperf$batched() ? leave : enter) && batched < config.maxBatched && entity != camera
-                && plain(mc, villager);
-            ImpostorMesh mesh = want ? meshOf(villager) : null;
-            int slot = mesh != null ? cachedSlot(villager, crowd) : -1;
-            want = slot >= 0 && d2 <= max;
-            boolean wasFar = crowd.crowdperf$batched() && crowd.crowdperf$far();
+            int kind = kindOf(villager);
+            boolean near = d2 <= (crowd.crowdperf$batched() ? leave : enter);
+            boolean special = !near && !plain(mc, villager);
+            boolean want = kind >= 0 && !near && batched < config.maxBatched && entity != camera && !special
+                && cachedSlot(villager, crowd) >= 0;
             crowd.crowdperf$setBatched(want);
-            if (!want) continue;
-            batched++;
-            ImpostorBatch batch;
-            if (farTurn) {
-                boolean isFar = d2 > farFrom;
-                crowd.crowdperf$setFar(isFar);
-                batch = isFar ? far : near;
-            } else if (wasFar) {
+            if (!want) {
+                if (near) lastNear++;
+                else if (special) lastSpecial++;
+                else lastOther++;
                 continue;
-            } else {
-                crowd.crowdperf$setFar(false);
-                batch = near;
             }
-            float[] data = d2 > low ? mesh.low : mesh.full;
-            int vertices = data.length / ImpostorMesh.FLOATS;
-            write(batch, batch.reserve(vertices), data, vertices, villager, slot, light(level, entity, crowd));
-            batch.commit(vertices);
+            // Past the view distance (the corners of the loaded square) the fog hides them anyway: they stay
+            // batched, so the normal renderer skips them and they tick lightly, but are not drawn.
+            if (d2 > max) {
+                lastHidden++;
+                continue;
+            }
+            batched++;
+            members[kind * 2 + (d2 > low ? 1 : 0)].add(villager);
         }
         anyBatched = batched > 0;
         lastBatched = batched;
         atlas.flush();
-        near.finish();
-        if (farTurn) far.finish();
-        lastQuads = near.quads() + far.quads();
+
+        renderer.begin(cam);
+        for (int g = 0; g < groups.length; g++) {
+            CrowdRenderer.Group group = groups[g];
+            List<AbstractVillager> list = members[g];
+            // Chunk by chunk, so each frame can drop whole chunks the camera does not see.
+            long[] order = sortKeys(list);
+            for (int k = 0; k < list.size(); k++) {
+                AbstractVillager villager = list.get((int) (order[k] & 0xFFFFFFFFL));
+                write(renderer.next(), villager, (CrowdEntity) villager, level);
+                renderer.commit(g, order[k] >>> 32, villager.getX(), villager.getY(), villager.getZ(), 2.1 * villager.getScale());
+            }
+            group.count = list.size();
+        }
+        renderer.finish(maxQuads);
+    }
+
+    private static long[] sortKeys = new long[1024];
+
+    /** (chunk x, chunk z, index) packed so that sorting groups the list by chunk. */
+    private static long[] sortKeys(List<AbstractVillager> list) {
+        int n = list.size();
+        if (sortKeys.length < n) sortKeys = new long[n * 2];
+        for (int i = 0; i < n; i++) {
+            AbstractVillager v = list.get(i);
+            long cx = (Mth.floor(v.getX()) >> 4) & 0xFFFF;
+            long cz = (Mth.floor(v.getZ()) >> 4) & 0xFFFF;
+            sortKeys[i] = cx << 48 | cz << 32 | i;
+        }
+        java.util.Arrays.sort(sortKeys, 0, n);
+        return sortKeys;
+    }
+
+    /** Culls and uploads the crowd for this frame; called after the level is extracted, before the render passes. */
+    public static void cull(net.minecraft.client.Camera camera) {
+        if (!CrowdPerf.config().batch) return;
+        Vec3 pos = camera.position();
+        renderer.cull(camera.getCullFrustum(), groups, CrowdPerf.config().frustumCulling, pos.x, pos.y, pos.z, camera.yRot(), camera.xRot());
+    }
+
+    private static int kindOf(AbstractVillager villager) {
+        if (villager instanceof WanderingTrader) return TRADER;
+        if (villager instanceof Villager) return villager.isBaby() ? BABY : VILLAGER;
+        return -1;
+    }
+
+    /**
+     * One instance, in {@link CrowdRenderer#INSTANCE} layout. Rotations are unwrapped so the shader can interpolate
+     * them linearly, like Mth.rotLerp does.
+     */
+    private static void write(long p, AbstractVillager v, CrowdEntity crowd, ClientLevel level) {
+        float bodyOld = v.yBodyRotO;
+        float bodyNew = bodyOld + Mth.wrapDegrees(v.yBodyRot - bodyOld);
+        float headOld = bodyOld + Mth.wrapDegrees(v.yHeadRotO - bodyOld);
+        float headNew = headOld + Mth.wrapDegrees(v.yHeadRot - headOld);
+        MemoryUtil.memPutFloat(p, (float) (v.xo - renderer.originX));
+        MemoryUtil.memPutFloat(p + 4, (float) (v.yo - renderer.originY));
+        MemoryUtil.memPutFloat(p + 8, (float) (v.zo - renderer.originZ));
+        MemoryUtil.memPutFloat(p + 12, (float) (v.getX() - renderer.originX));
+        MemoryUtil.memPutFloat(p + 16, (float) (v.getY() - renderer.originY));
+        MemoryUtil.memPutFloat(p + 20, (float) (v.getZ() - renderer.originZ));
+        MemoryUtil.memPutFloat(p + 24, bodyOld);
+        MemoryUtil.memPutFloat(p + 28, bodyNew);
+        MemoryUtil.memPutFloat(p + 32, headOld);
+        MemoryUtil.memPutFloat(p + 36, headNew);
+        // WalkAnimationState: position(t) runs linearly from position(0) to position(1); speed(t) likewise.
+        MemoryUtil.memPutFloat(p + 40, v.walkAnimation.position(0.0F));
+        MemoryUtil.memPutFloat(p + 44, v.walkAnimation.position(1.0F));
+        MemoryUtil.memPutFloat(p + 48, v.walkAnimation.speed(0.0F));
+        MemoryUtil.memPutFloat(p + 52, v.walkAnimation.speed(1.0F));
+        int slot = crowd.crowdperf$slot();
+        MemoryUtil.memPutFloat(p + 56, slot % ImpostorAtlas.COLUMNS);
+        MemoryUtil.memPutFloat(p + 60, slot / ImpostorAtlas.COLUMNS);
+        MemoryUtil.memPutFloat(p + 64, v.getScale());
+        MemoryUtil.memPutFloat(p + 68, v.getXRot());
+        MemoryUtil.memPutInt(p + 72, light(level, v, crowd));
     }
 
     /**
      * The entity's atlas slot, cached on the entity: the look only changes when the villager data object is replaced
-     * (new profession or biome) or the villager grows up, so the key is that object plus the atlas generation.
+     * (new profession, level or biome) or the villager grows up, so the key is that object plus the atlas generation.
      */
     private static int cachedSlot(AbstractVillager villager, CrowdEntity crowd) {
         Object data = villager instanceof Villager v ? v.getVillagerData() : villager.getType();
@@ -176,7 +256,7 @@ public final class Impostors {
 
     private record LookKey(Object data, boolean baby, int generation) {}
 
-    /** Whether the villager looks like its rest pose: anything special keeps it a normal entity. */
+    /** Whether the villager is drawn by the model and walk cycle alone: anything special keeps it a normal entity. */
     private static boolean plain(Minecraft mc, AbstractVillager v) {
         return !v.isInvisible() && !v.isPassenger() && !v.isVehicle() && !v.isSleeping() && v.deathTime == 0 && v.hurtTime == 0
             && !v.isLeashed() && !(v.hasCustomName() && v.isCustomNameVisible()) && !mc.shouldEntityAppearGlowing(v);
@@ -184,15 +264,20 @@ public final class Impostors {
 
     private static void bake(EntityModelSet models) {
         // Far away the nose and the hat are a pixel or two; the low mesh leaves them out.
-        villagerMesh = ImpostorMesh.bake(models.bakeLayer(ModelLayers.VILLAGER), path -> !path.contains("nose") && !path.contains("hat"));
-        babyMesh = ImpostorMesh.bake(models.bakeLayer(ModelLayers.VILLAGER_BABY), path -> !path.contains("nose") && !path.contains("hat"));
-        traderMesh = ImpostorMesh.bake(models.bakeLayer(ModelLayers.WANDERING_TRADER), path -> !path.contains("nose") && !path.contains("hat"));
-    }
-
-    private static ImpostorMesh meshOf(AbstractVillager villager) {
-        if (villager instanceof WanderingTrader) return traderMesh;
-        if (villager instanceof Villager) return villager.isBaby() ? babyMesh : villagerMesh;
-        return null;
+        ImpostorMesh villager = ImpostorMesh.bake(models.bakeLayer(ModelLayers.VILLAGER), path -> !path.contains("nose") && !path.contains("hat"));
+        ImpostorMesh baby = ImpostorMesh.bake(models.bakeLayer(ModelLayers.VILLAGER_BABY), path -> !path.contains("nose") && !path.contains("hat"));
+        ImpostorMesh trader = ImpostorMesh.bake(models.bakeLayer(ModelLayers.WANDERING_TRADER), path -> !path.contains("nose") && !path.contains("hat"));
+        meshes = new ImpostorMesh[] {villager, baby, trader};
+        long[] offsets = renderer.uploadMeshes(villager.full, villager.low, baby.full, baby.low, trader.full, trader.low);
+        maxQuads = 0;
+        for (int kind = 0; kind < KINDS; kind++) {
+            for (int lod = 0; lod < 2; lod++) {
+                CrowdRenderer.Group group = groups[kind * 2 + lod];
+                group.meshOffset = offsets[kind * 2 + lod];
+                group.quads = meshes[kind].quads(lod == 1);
+                maxQuads = Math.max(maxQuads, group.quads);
+            }
+        }
     }
 
     /** The atlas slot for the villager's look, built like VillagerProfessionLayer stacks its layers. */
@@ -205,20 +290,22 @@ public final class Impostors {
         Holder<VillagerProfession> profession = data.profession();
         boolean working = !baby && !profession.is(VillagerProfession.NONE);
         Identifier job = working ? key(profession) : null;
-        String look = (baby ? "baby|" : "adult|") + type + "|" + job;
+        boolean badge = working && !profession.is(VillagerProfession.NITWIT);
+        int level = Math.clamp(data.level(), 1, LEVELS.length);
+        String look = (baby ? "baby|" : "adult|") + type + "|" + job + "|" + (badge ? level : 0);
         // Fast path: the look is usually already in the atlas.
         int known = atlas.slot(look, null, null);
         if (known >= 0 || type == null) return known;
-        List<ImpostorAtlas.Layer> layers = new ArrayList<>(2);
+        List<ImpostorAtlas.Layer> layers = new ArrayList<>(3);
         Identifier typeTexture = texture(baby ? "baby" : "type", type);
         Identifier jobTexture = job != null ? texture("profession", job) : null;
         var typeHat = atlas.hat(texture("type", type));
         var jobHat = job != null ? atlas.hat(jobTexture) : VillagerMetadataSection.Hat.NONE;
         boolean typeHatVisible = jobHat == VillagerMetadataSection.Hat.NONE
-            || jobHat == VillagerMetadataSection.Hat.PARTIAL
-                && typeHat != VillagerMetadataSection.Hat.FULL;
+            || jobHat == VillagerMetadataSection.Hat.PARTIAL && typeHat != VillagerMetadataSection.Hat.FULL;
         layers.add(new ImpostorAtlas.Layer(typeTexture, !baby && !typeHatVisible));
         if (jobTexture != null) layers.add(new ImpostorAtlas.Layer(jobTexture, false));
+        if (badge) layers.add(new ImpostorAtlas.Layer(texture("profession_level", Identifier.withDefaultNamespace(LEVELS[level - 1])), false));
         return atlas.slot(look, baby ? BABY_SKIN : VILLAGER_SKIN, layers);
     }
 
@@ -243,56 +330,18 @@ public final class Impostors {
         return light;
     }
 
-    private static void write(ImpostorBatch batch, long pointer, float[] data, int vertices, AbstractVillager v, int slot, int light) {
-        // As LivingEntityRenderer.setupRotations: turn the body by (180 - bodyRot) around Y.
-        float angle = (float) Math.toRadians(180.0F - v.yBodyRot);
-        float cos = (float) Math.cos(angle);
-        float sin = (float) Math.sin(angle);
-        float scale = v.getScale();
-        float px = (float) (v.getX() - batch.originX);
-        float py = (float) (v.getY() - batch.originY);
-        float pz = (float) (v.getZ() - batch.originZ);
-        float su = slot % ImpostorAtlas.COLUMNS;
-        float sv = slot / ImpostorAtlas.COLUMNS;
-        float cu = 1.0F / ImpostorAtlas.COLUMNS;
-        float cv = 1.0F / ImpostorAtlas.ROWS;
-        int overlay = OverlayTexture.NO_OVERLAY;
-        for (int i = 0, k = 0; i < vertices; i++, k += ImpostorMesh.FLOATS, pointer += VERTEX_BYTES) {
-            float x = data[k] * scale;
-            float y = data[k + 1] * scale;
-            float z = data[k + 2] * scale;
-            float nx = data[k + 5];
-            float nz = data[k + 7];
-            MemoryUtil.memPutFloat(pointer, px + x * cos + z * sin);
-            MemoryUtil.memPutFloat(pointer + 4, py + y);
-            MemoryUtil.memPutFloat(pointer + 8, pz - x * sin + z * cos);
-            MemoryUtil.memPutInt(pointer + 12, WHITE);
-            MemoryUtil.memPutFloat(pointer + 16, (su + data[k + 3]) * cu);
-            MemoryUtil.memPutFloat(pointer + 20, (sv + data[k + 4]) * cv);
-            MemoryUtil.memPutInt(pointer + 24, overlay);
-            MemoryUtil.memPutInt(pointer + 28, light);
-            MemoryUtil.memPutByte(pointer + 32, normal(nx * cos + nz * sin));
-            MemoryUtil.memPutByte(pointer + 33, normal(data[k + 6]));
-            MemoryUtil.memPutByte(pointer + 34, normal(-nx * sin + nz * cos));
-            MemoryUtil.memPutByte(pointer + 35, (byte) 0);
-        }
-    }
-
-    private static byte normal(float c) {
-        return (byte) ((int) (Math.clamp(c, -1.0F, 1.0F) * 127.0F) & 0xFF);
-    }
-
-    /** Draws both batches; called inside the solid pass of the main render target. */
+    /** Draws the crowd; called inside the solid pass of the main render target. */
     public static void draw(RenderPass pass) {
         if (!CrowdPerf.config().batch) return;
-        Vec3 cam = Minecraft.getInstance().gameRenderer.mainCamera().position();
-        near.draw(pass, cam);
-        far.draw(pass, cam);
+        renderer.draw(pass, groups, ImpostorAtlas.ID, 1.0F / ImpostorAtlas.COLUMNS);
     }
 
     static String stats() {
         long avg = builds == 0 ? 0 : buildNanos / builds / 1000;
-        return "batched " + lastBatched + ", quads " + lastQuads + ", build " + avg + " µs avg over " + builds + ", looks " + atlas.size();
+        int quads = 0;
+        for (CrowdRenderer.Group g : groups) quads += g.visible * g.quads;
+        return "batched " + lastBatched + " + hidden " + lastHidden + " (normal: near " + lastNear + ", special " + lastSpecial + ", other " + lastOther + "), in view " + renderer.lastVisible + " in " + renderer.lastCells + " cells, quads " + quads + ", build " + avg + " µs avg over " + builds + ", looks " + atlas.size()
+            + (renderer.broken() ? ", SHADER FAILED" : "");
     }
 
     static void resetStats() {

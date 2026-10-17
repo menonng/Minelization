@@ -35,6 +35,8 @@ loom {
             vmArg "-Dgrandstrategy.capture=" + (project.findProperty("capture") ?: "false")
             vmArg "-Dcrowdperf.log=" + (project.findProperty("capture") ?: "false")
             if (project.findProperty("crowdBatch") != null) vmArg "-Dcrowdperf.batch=" + project.findProperty("crowdBatch")
+            // Any -Pcrowdperf.<setting>=<value> or -Pgrandstrategy.<setting>=<value> is passed to the dev client as a system property.
+            project.properties.findAll { it.key.startsWith("crowdperf.") || it.key.startsWith("grandstrategy.") }.each { vmArg "-D${it.key}=${it.value}" }
             if (project.findProperty("jfr") != null) {
                 vmArg "-XX:StartFlightRecording=delay=40s,duration=${project.findProperty("jfr")}s,settings=profile,filename=jfr/client.jfr"
             }

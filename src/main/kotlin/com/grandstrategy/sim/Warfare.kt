@@ -86,7 +86,11 @@ object Warfare {
             if (wasCapital) {
                 defender.stability = (defender.stability - 20).coerceAtLeast(0.0)
                 sim.log(EventKind.MAJOR, "${attacker.name}이(가) ${defender.name}의 수도를 함락했다", attacker.id, defender.id)
-                sim.cinematic(Cinematic.CapitalFell(defender.id, attacker.id, target.second))
+                // One cutscene per collapse: a capital that keeps falling every turn would replay it endlessly.
+                if (state.turn - defender.capitalFellTurn >= CAPITAL_CUTSCENE_TURNS) {
+                    sim.cinematic(Cinematic.CapitalFell(defender.id, attacker.id, target.second))
+                }
+                defender.capitalFellTurn = state.turn
                 relocateCapital(sim, defender)
             } else {
                 sim.log(EventKind.WAR, "${attacker.name}이(가) ${defender.name}의 영토 ${Chunks.format(target.second)}를 점령했다", attacker.id, defender.id)
@@ -139,9 +143,38 @@ object Warfare {
         }
     }
 
+    /** Turns between two capital-fall cutscenes for the same nation. */
+    const val CAPITAL_CUTSCENE_TURNS = 30L
+
+    /**
+     * Moves the capital to the safest land left: the chunk farthest (in steps through the nation's own land) from any
+     * chunk an enemy holds, preferring the old capital's surroundings on ties. Taking the nearest chunk put the new
+     * capital on the front line, where it fell again the next turn, and again, all the way across the country.
+     */
     fun relocateCapital(sim: Simulation, nation: Nation) {
         val old = nation.capital
-        val next = nation.claims.minByOrNull { Chunks.distance(it, old) } ?: return
+        if (nation.claims.isEmpty()) return
+        val enemies = sim.state.enemiesOf(nation.id)
+        val depth = HashMap<Long, Int>()
+        val queue = ArrayDeque<Long>()
+        for (chunk in nation.claims) {
+            if (Chunks.neighbors(chunk).any { n -> sim.state.owners[n]?.let { it in enemies } == true }) {
+                depth[chunk] = 0
+                queue.addLast(chunk)
+            }
+        }
+        while (queue.isNotEmpty()) {
+            val chunk = queue.removeFirst()
+            val d = depth.getValue(chunk)
+            for (n in Chunks.neighbors(chunk)) {
+                if (n in nation.claims && n !in depth) {
+                    depth[n] = d + 1
+                    queue.addLast(n)
+                }
+            }
+        }
+        // Not at war (or the front is unreachable): every chunk is equally safe, so stay close to the old capital.
+        val next = nation.claims.maxWithOrNull(compareBy<Long> { depth[it] ?: Int.MAX_VALUE }.thenBy { -Chunks.distance(it, old) }) ?: return
         nation.capital = next
         nation.markerPlaced = false
     }

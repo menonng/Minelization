@@ -25,6 +25,8 @@ class ImpostorMeshTest {
         // head, hat, hat rim, nose, body, jacket, three arm boxes, two legs: 11 cubes of 6 faces
         assertEquals(66, quads(mesh.full));
         assertEquals(66 - 3 * 6, quads(mesh.low));
+        assertEquals(66, mesh.quads(false));
+        assertEquals(48, mesh.quads(true));
     }
 
     @Test
@@ -51,10 +53,44 @@ class ImpostorMeshTest {
     }
 
     @Test
+    void headAndLegsKnowTheirPartAndPivot() {
+        float[] d = ImpostorMesh.bake(villager(), path -> true).full;
+        int head = 0, legs = 0;
+        for (int k = 0; k < d.length; k += ImpostorMesh.FLOATS) {
+            int part = (int) d[k + 8];
+            float px = d[k + 9], py = d[k + 10], pz = d[k + 11];
+            if (part == ImpostorMesh.HEAD) {
+                head++;
+                // The neck: on the axis, at the top of the body (about 1.5 blocks up), and the head sits above it.
+                assertEquals(0.0F, px, 1e-4F);
+                assertEquals(0.0F, pz, 1e-4F);
+                assertTrue(py > 1.3F && py < 1.6F, "neck at " + py);
+                assertTrue(d[k + 1] >= py - 0.07F, "head vertex below the neck (the nose reaches one pixel down): " + d[k + 1]);
+            } else if (part == ImpostorMesh.RIGHT_LEG || part == ImpostorMesh.LEFT_LEG) {
+                legs++;
+                // The hips: about 0.7 blocks up, a little to each side (the model is mirrored on X).
+                assertTrue(py > 0.6F && py < 0.8F, "hip at " + py);
+                assertTrue(Math.abs(px) > 0.05F && Math.abs(px) < 0.2F, "hip x " + px);
+                assertTrue(d[k + 1] <= py + 0.01F, "leg vertex above the hip: " + d[k + 1]);
+            }
+        }
+        // Head, hat, rim and nose turn with the head; both legs swing.
+        assertEquals(4 * 6 * 4, head);
+        assertEquals(2 * 6 * 4, legs);
+    }
+
+    @Test
     void uvsStayInsideTheSkin() {
         float[] d = ImpostorMesh.bake(villager(), path -> true).full;
         for (int k = 0; k < d.length; k += ImpostorMesh.FLOATS) {
             assertTrue(d[k + 3] >= 0 && d[k + 3] <= 1 && d[k + 4] >= 0 && d[k + 4] <= 1, "uv " + d[k + 3] + "," + d[k + 4]);
         }
+    }
+
+    @Test
+    void instanceAndMeshLayoutsMatchTheShader() {
+        // crowd.vsh reads these offsets; the Java writers in Impostors and CrowdRenderer must agree.
+        assertEquals(40, CrowdRenderer.MESH_BYTES);
+        assertEquals(76, CrowdRenderer.INSTANCE_BYTES);
     }
 }

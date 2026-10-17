@@ -10,7 +10,9 @@ public abstract class EntityMixin implements CrowdEntity {
     @Unique
     private boolean crowdperf$batched;
     @Unique
-    private boolean crowdperf$far;
+    private int crowdperf$lastUpdate;
+    @Unique
+    private float crowdperf$updateInterval;
     @Unique
     private int crowdperf$light;
     @Unique
@@ -31,13 +33,23 @@ public abstract class EntityMixin implements CrowdEntity {
     }
 
     @Override
-    public boolean crowdperf$far() {
-        return this.crowdperf$far;
+    public int crowdperf$lastUpdate() {
+        return this.crowdperf$lastUpdate;
     }
 
     @Override
-    public void crowdperf$setFar(boolean far) {
-        this.crowdperf$far = far;
+    public void crowdperf$setLastUpdate(int tick) {
+        this.crowdperf$lastUpdate = tick;
+    }
+
+    @Override
+    public float crowdperf$updateInterval() {
+        return this.crowdperf$updateInterval;
+    }
+
+    @Override
+    public void crowdperf$setUpdateInterval(float ticks) {
+        this.crowdperf$updateInterval = ticks;
     }
 
     @Override

@@ -25,6 +25,10 @@ object GrandStrategyClient : ClientModInitializer {
             CutscenePlayer.start(CutsceneSpec.decode(payload.json))
         }
         val capture = System.getProperty("grandstrategy.capture") == "true"
+        // Ticks between automatic screenshots in capture mode (short intervals show motion frame by frame).
+        val captureTicks = Integer.getInteger("grandstrategy.captureTicks", 200).coerceAtLeast(1)
+        // ...and at most this many per run, so a forgotten capture run cannot fill the disk.
+        val captureLimit = Integer.getInteger("grandstrategy.captureLimit", 300)
         var ticks = 0
         var shots = 0
         var screenTicks = 0
@@ -41,19 +45,24 @@ object GrandStrategyClient : ClientModInitializer {
             if (capture) {
                 if (mc.gui.screen() == null) screenTicks = 0 else if (++screenTicks > 300) mc.gui.setScreen(null)
             }
-            if (capture && mc.level != null && !CutscenePlayer.active && ++ticks % 200 == 0) {
-                Screenshot.grab(mc.gameDirectory, "view_%03d.png".format(shots++), mc.gameRenderer.mainRenderTarget(), 1) { }
+            if (capture && mc.level != null && !CutscenePlayer.active && ++ticks % captureTicks == 0) {
+                if (shots < captureLimit) Screenshot.grab(mc.gameDirectory, "view_%03d.png".format(shots++), mc.gameRenderer.mainRenderTarget(), 1) { }
                 // Performance probe for automated runs: frame rate against the size of the crowd in view.
                 val level = mc.level
                 if (level != null) {
                     var villagers = 0
                     var near = 0
                     val eye = mc.player?.position()
-                    for (e in level.entitiesForRendering()) if (e is net.minecraft.world.entity.npc.villager.Villager) {
-                        villagers++
-                        if (eye != null && e.distanceToSqr(eye) < 40.0 * 40.0) near++
+                    val types = HashMap<String, Int>()
+                    for (e in level.entitiesForRendering()) {
+                        types.merge(e.type.toShortString(), 1, Int::plus)
+                        if (e is net.minecraft.world.entity.npc.villager.Villager) {
+                            villagers++
+                            if (eye != null && e.distanceToSqr(eye) < 40.0 * 40.0) near++
+                        }
                     }
-                    com.grandstrategy.GrandStrategy.LOGGER.info("[perf] fps {} entities {} villagers {} (within 40: {})", mc.fps, level.entityCount, villagers, near)
+                    val top = types.entries.sortedByDescending { it.value }.take(5).joinToString { "${it.key} ${it.value}" }
+                    com.grandstrategy.GrandStrategy.LOGGER.info("[perf] fps {} entities {} villagers {} (within 40: {}) · {}", mc.fps, level.entityCount, villagers, near, top)
                 }
             }
         }

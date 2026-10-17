@@ -91,7 +91,8 @@ object WorkMode {
         ClientPlayNetworking.send(ClientMessagePayload(WorkJson.json.encodeToString(ToServer.serializer(), message)))
     }
 
-    private val autoWork = System.getProperty("grandstrategy.capture") == "true"
+    /** Capture runs switch work mode on by themselves (to test it), unless -Dgrandstrategy.captureWork=false (benchmarks of normal play). */
+    private val autoWork = System.getProperty("grandstrategy.capture") == "true" && System.getProperty("grandstrategy.captureWork") != "false"
 
     fun tick(mc: Minecraft) {
         ticks++

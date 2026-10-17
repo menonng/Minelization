@@ -16,15 +16,16 @@ public final class CrowdConfig {
     public boolean batch = true;
     /** Villagers farther than this (blocks) go into the batch. */
     public double batchDistance = 32.0;
+    /** Each frame, only the chunks of the crowd the camera can see are sent to the GPU. */
+    public boolean frustumCulling = true;
     /** Past this the batch uses a simpler mesh (no nose or hat). */
     public double lowDetailDistance = 64.0;
-    /** The batch is rebuilt every this many ticks (1 = 20 times a second). */
-    public int rebuildTicks = 1;
-    /** Villagers past this go into a second batch that is rebuilt only every {@link #farRebuildTicks} ticks. */
-    public double farDistance = 96.0;
-    public int farRebuildTicks = 4;
-    /** Batched villagers skip the full client tick; their movement still interpolates. */
+    /** Batched villagers skip the full client tick; their movement, head and walk cycle still update. */
     public boolean lightTick = true;
+    /** Villagers ease towards each server update over the time until the next one, so rare updates still walk smoothly. */
+    public boolean smoothMotion = true;
+    /** Remember which precipitation falls on each column instead of looking up the biome for every column every frame. */
+    public boolean weatherCache = true;
     /** Villagers drawn as full models skip their clothing layers, held item and shadow past this distance. */
     public double detailDistance = 48.0;
     /** Villagers stay visible as far as terrain instead of vanilla's ~64 block cutoff for small mobs. */

@@ -94,7 +94,7 @@
 ## 최적화
 
 - 서버: Lithium · FerriteCore · Krypton · ServerCore · C2ME · ScalableLux, 클라이언트: Sodium · Entity Culling · ImmediatelyFast · Lithium · FerriteCore를 권한다(전부 Modrinth).
-- **CrowdPerf**(`crowdperf/`, 별도 모드, 클라이언트 전용): 32칸 밖 주민을 틱마다 GPU 버퍼 하나로 묶어 한 번에 그린다. 같은 장면에서 최적화 모드만으로 약 230 FPS → CrowdPerf까지 약 1,400~1,900 FPS. 설정은 `config/crowdperf.json`, 명령 `/crowdperf`. 자세한 내용은 [crowdperf/README.md](crowdperf/README.md)와 [docs/ROADMAP.md](docs/ROADMAP.md) 1.14.
+- **CrowdPerf**(`crowdperf/`, 별도 모드, 클라이언트 전용): 32칸 밖 주민을 GPU 인스턴스로 그린다. 정점 셰이더가 걷는 다리와 고개를 움직이고, 화면 밖은 보내지 않는다. 시뮬레이션 거리 12청크·주민 약 3,000명에서 최적화 모드만으로 약 300 FPS → CrowdPerf까지 약 3,300~3,700 FPS(작업 지정 화면을 켜면 약 2,500). 설정은 `config/crowdperf.json`, 명령 `/crowdperf`. 자세한 내용은 [crowdperf/README.md](crowdperf/README.md)와 [docs/ROADMAP.md](docs/ROADMAP.md) 1.14·1.15.
 
 ## 세계 지도
 
