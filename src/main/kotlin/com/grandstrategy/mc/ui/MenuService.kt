@@ -173,7 +173,12 @@ class MenuService(private val rt: Runtime) {
                 flag = n.flag, era = content.era(n).name, eraIndex = content.eraIndex(n), eraCount = content.eras.size,
                 techTotal = content.techTotal(n), nextEraAt = content.eras.getOrNull(content.eraIndex(n) + 1)?.techTotal ?: content.techTotal(n),
                 weapon = content.weapon(n).name, energy = content.energySource(n).name, ideology = content.ideologyOf(n)?.name ?: "",
-                districts = com.grandstrategy.sim.Districts.ofNation(rt.state, n).size, districtLimit = com.grandstrategy.sim.Districts.limit(n)
+                districts = com.grandstrategy.sim.Districts.ofNation(rt.state, n).size, districtLimit = com.grandstrategy.sim.Districts.limit(n),
+                leader = com.grandstrategy.sim.Leaders.describe(n) ?: "",
+                leaderInfo = n.leader?.let { l ->
+                    "${com.grandstrategy.sim.Leaders.age(sim, l)}세 · 재위 ${com.grandstrategy.sim.Leaders.reign(sim, l)}년 · ${com.grandstrategy.sim.Leaders.succession(n).label} · " +
+                        com.grandstrategy.sim.Leaders.traits(l)
+                } ?: ""
             )
         }
         val nations = state.alive().filter { it.id != mine?.id }.map { n ->
@@ -184,7 +189,8 @@ class MenuService(private val rt: Runtime) {
                 population = n.population.toInt(), military = n.military.toInt(), strength = sim.strength(n), ruler = n.rulerName ?: "AI",
                 posture = n.posture, opinion = r?.opinion ?: 0.0, treaties = r?.treaties?.keys?.filter { r.has(it, state.turn) } ?: emptyList(),
                 atWar = war != null, warScore = mine?.let { war?.scoreFor(it.id) } ?: 0.0, exhaustion = mine?.let { war?.exhaustionOf(it.id) } ?: 0.0,
-                border = mine?.let { sim.borderLength(it.id, n.id) } ?: 0, flag = n.flag
+                border = mine?.let { sim.borderLength(it.id, n.id) } ?: 0, flag = n.flag,
+                leader = com.grandstrategy.sim.Leaders.describe(n) ?: ""
             )
         }.sortedWith(compareByDescending<NationRow> { it.atWar }.thenByDescending { it.border }.thenByDescending { it.claims })
         val towns = mine?.let { n ->

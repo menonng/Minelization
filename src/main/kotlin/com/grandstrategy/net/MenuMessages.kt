@@ -52,7 +52,10 @@ data class NationCard(
     val ideology: String = "",
     /** Administrative districts and how many chunks one can hold. */
     val districts: Int = 0,
-    val districtLimit: Int = 0
+    val districtLimit: Int = 0,
+    /** The ruling character of an AI-run nation ("왕 아르린 3세") and a line about them; empty while a player rules. */
+    val leader: String = "",
+    val leaderInfo: String = ""
 )
 
 @Serializable
@@ -83,7 +86,8 @@ data class NationRow(
     val warScore: Double = 0.0,
     val exhaustion: Double = 0.0,
     val border: Int = 0,
-    val flag: com.grandstrategy.sim.Flag? = null
+    val flag: com.grandstrategy.sim.Flag? = null,
+    val leader: String = ""
 )
 
 @Serializable

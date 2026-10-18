@@ -155,6 +155,19 @@ object GsCommands {
                 }
                 reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
             })
+            .then(literal("leader").executes { ctx ->
+                val r = rt()
+                val L = com.grandstrategy.sim.Leaders
+                val nations = ctx.source.player?.let { r.citizenNation(it) }?.let { listOf(it) } ?: r.state.alive()
+                val text = nations.joinToString("\n") { n ->
+                    val now = n.leader?.let { l ->
+                        "${L.describe(n)} (${l.house} 가, ${L.age(r.sim, l)}세, 재위 ${L.reign(r.sim, l)}년, ${L.succession(n).label}) · ${L.traits(l)}"
+                    } ?: "통치자 ${n.rulerName ?: "없음"} (플레이어)"
+                    val past = n.pastLeaders.takeLast(3).reversed().joinToString(" / ")
+                    "${n.name}: $now" + (if (past.isNotEmpty()) "\n  이전: $past" else "")
+                }
+                reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
+            })
             .then(literal("districts").executes { ctx ->
                 val r = rt()
                 val nations = ctx.source.player?.let { r.citizenNation(it) }?.let { listOf(it) } ?: r.state.alive()

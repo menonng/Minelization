@@ -92,6 +92,7 @@ object Warfare {
                 }
                 defender.capitalFellTurn = state.turn
                 relocateCapital(sim, defender)
+                Leaders.onCapitalFall(sim, defender)
             } else {
                 sim.log(EventKind.WAR, "${attacker.name}이(가) ${defender.name}의 영토 ${Chunks.format(target.second)}를 점령했다", attacker.id, defender.id)
             }
@@ -182,13 +183,13 @@ object Warfare {
     fun wantsPeace(sim: Simulation, nation: Nation, war: War): Boolean {
         val exhaustion = war.exhaustionOf(nation.id)
         val score = war.scoreFor(nation.id)
-        return exhaustion > 50 + nation.personality.aggression * 30 || score < -30 || (exhaustion > 25 && score < -10)
+        return exhaustion > 50 + Leaders.temper(nation).aggression * 30 || score < -30 || (exhaustion > 25 && score < -10)
     }
 
     fun acceptsPeace(sim: Simulation, nation: Nation, war: War): Boolean {
         val score = war.scoreFor(nation.id)
         val exhaustion = war.exhaustionOf(nation.id)
-        return wantsPeace(sim, nation, war) || (score < 20 && exhaustion > 20) || exhaustion > 70 + nation.personality.aggression * 40
+        return wantsPeace(sim, nation, war) || (score < 20 && exhaustion > 20) || exhaustion > 70 + Leaders.temper(nation).aggression * 40
     }
 
     fun makePeace(sim: Simulation, war: War, requester: Nation) {

@@ -65,6 +65,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         Economy.run(this)
         Progress.run(this)
         Population.run(this)
+        Leaders.run(this)
         Settlements.run(this)
         Diplomacy.run(this)
         Ai.run(this)
@@ -99,7 +100,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         if (nation.has(Resource.IRON) <= 0.0) s *= 0.8
         if (nation.has(Resource.FOOD) <= 0.0) s *= 0.6
         if (nation.policy == Policy.MILITARY) s *= 1.1
-        s *= Content.militaryFactor(nation)
+        s *= Content.militaryFactor(nation) * Leaders.militaryFactor(nation)
         return s
     }
 

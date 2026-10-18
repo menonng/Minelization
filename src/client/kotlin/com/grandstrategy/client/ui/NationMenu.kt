@@ -545,7 +545,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         g.fillGradient(0, 0, width, height, Ui.argb(0x000000, 80), Ui.argb(0x000000, 160))
         Ui.panel(g, left, top, panelW, panelH, parchment = true)
         val n = view.nation
-        val title = if (n != null) "${n.name} · ${view.turn}턴 · 통치자 ${n.ruler}" else "나라 선택 · ${view.turn}턴"
+        val title = if (n != null) "${n.name} · ${view.turn}턴 · ${n.leader.ifEmpty { "통치자 ${n.ruler}" }}" else "나라 선택 · ${view.turn}턴"
         Ui.ribbon(g, font, left + 10, top + 8, panelW - 70, n?.color ?: 0x8A6A3A, Component.literal(title), n?.let { NationMenu.flagOf(it.flag, it.dye) } ?: ItemStack(Items.MAP))
     }
 
@@ -584,7 +584,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
             val y = cy + 18 + k * 22
             g.item(NationMenu.flagOf(n.flag, n.dye), cx, y + 2)
             g.text(font, Component.literal(n.name), cx + 20, y + 2, Ui.argb(Ui.readable(n.color)), false)
-            ink(g, "영토 ${n.claims} · 인구 ${n.population} · 병력 ${n.military} · ${n.ruler}", cx + 20, y + 11, 0x6B5A44)
+            ink(g, "영토 ${n.claims} · 인구 ${n.population} · 병력 ${n.military} · ${n.leader.ifEmpty { n.ruler }}", cx + 20, y + 11, 0x6B5A44)
         }
         ink(g, view.foundError ?: "지금 선 곳에 새 나라를 세울 수 있다", cx + 166, top + panelH - 28, if (view.foundError == null) 0x2E6A2E else 0x9A2A1A)
     }
@@ -592,6 +592,10 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
     private fun drawOverview(g: GuiGraphicsExtractor) {
         val n = view.nation ?: return
         heading(g, "자원 (보관 한도 ${NationMenu.number(n.storage)})", cx, cy)
+        if (n.leaderInfo.isNotEmpty()) {
+            val info = font.plainSubstrByWidth(n.leaderInfo, cw - 160)
+            ink(g, info, cx + cw - font.width(info), cy, 0x6B5A44)
+        }
         var x = cx
         val step = (cw - 4) / 5
         for (r in Resource.entries) {
@@ -786,7 +790,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         val dx = cx + 214
         g.item(NationMenu.bannerOf(target.dye), dx, cy + 12)
         g.text(font, Component.literal(target.name), dx + 18, cy + 16, Ui.argb(Ui.readable(target.color)), false)
-        ink(g, "통치자 ${target.ruler} · ${target.posture.label}", dx, cy + 32, 0x6B5A44)
+        ink(g, "${target.leader.ifEmpty { "통치자 ${target.ruler}" }} · ${target.posture.label}", dx, cy + 32, 0x6B5A44)
         ink(g, "영토 ${target.claims} · 인구 ${target.population}", dx, cy + 44)
         ink(g, "병력 ${target.military} · 전투력 ${NationMenu.number(target.strength)}", dx, cy + 56)
         ink(g, "호감도 ${target.opinion.toInt()} · 국경 ${target.border}", dx, cy + 68)

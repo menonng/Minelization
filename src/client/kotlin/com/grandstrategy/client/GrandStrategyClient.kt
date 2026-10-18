@@ -62,7 +62,10 @@ object GrandStrategyClient : ClientModInitializer {
                         }
                     }
                     val top = types.entries.sortedByDescending { it.value }.take(5).joinToString { "${it.key} ${it.value}" }
-                    com.grandstrategy.GrandStrategy.LOGGER.info("[perf] fps {} entities {} villagers {} (within 40: {}) · {}", mc.fps, level.entityCount, villagers, near, top)
+                    val named = level.entitiesForRendering().filter { it.isCustomNameVisible && it.hasCustomName() }
+                        .joinToString(limit = 3) { "${it.customName?.string} @ ${it.blockX},${it.blockZ}" }
+                    com.grandstrategy.GrandStrategy.LOGGER.info("[perf] fps {} entities {} villagers {} (within 40: {}) · {}{}", mc.fps, level.entityCount, villagers, near, top,
+                        if (named.isEmpty()) "" else " · named: $named")
                 }
             }
         }

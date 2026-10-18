@@ -17,6 +17,15 @@ object Names {
 
     fun settlement(rng: Random): String = root(rng) + " " + villageTails.random(rng)
 
+    private val given = listOf("아르", "벨", "카", "로", "엘", "타", "세", "라", "오", "리", "하", "에", "미", "노", "드")
+    private val givenTails = listOf("린", "단", "노르", "아", "온", "리아", "벤", "로", "란", "드", "엘", "온", "사")
+
+    /** A ruler's given name. */
+    fun person(rng: Random): String = given.random(rng) + givenTails.random(rng)
+
+    /** A ruling house (family name). */
+    fun house(rng: Random): String = root(rng)
+
     /** An administrative district: a place name with a province word. */
     fun district(rng: Random): String = root(rng) + " " + listOf("주", "군", "현", "도").random(rng)
 }

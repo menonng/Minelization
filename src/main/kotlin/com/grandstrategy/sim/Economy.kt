@@ -32,7 +32,8 @@ object Economy {
                 Resource.WOOD -> 1.0 + 0.05 * nation.level(TechBranch.INDUSTRY)
                 else -> 1.0 + 0.1 * nation.level(TechBranch.MINING)
             }
-            result[r] = (base[r] ?: 0.0) * labor * facility * tech * policy * unrest * Content.productionFactor(nation) * Population.productionFactor(nation)
+            result[r] = (base[r] ?: 0.0) * labor * facility * tech * policy * unrest * Content.productionFactor(nation) * Population.productionFactor(nation) *
+                Leaders.productionFactor(nation, r)
         }
         var tax = nation.population * Balance.TAX_PER_POP
         if (nation.policy == Policy.SCIENCE) tax *= 0.9
@@ -53,7 +54,7 @@ object Economy {
     fun science(nation: Nation): Double {
         var s = nation.population * Balance.SCIENCE_PER_POP * (1.0 + 0.15 * nation.level(TechBranch.EDUCATION))
         if (nation.policy == Policy.SCIENCE) s *= 1.3
-        return (s + nation.count(Facility.LIBRARY) * Balance.SCIENCE_PER_LIBRARY) * Content.scienceFactor(nation)
+        return (s + nation.count(Facility.LIBRARY) * Balance.SCIENCE_PER_LIBRARY) * Content.scienceFactor(nation) * Leaders.scienceFactor(nation)
     }
 
     private fun step(sim: Simulation, nation: Nation) {
@@ -93,7 +94,7 @@ object Economy {
         }
 
         var target = Balance.BASE_STABILITY + 3.0 * nation.level(TechBranch.ADMINISTRATION) + Content.stabilityBonus(nation) -
-            Population.stabilityPenalty(nation)
+            Population.stabilityPenalty(nation) + Leaders.stabilityBonus(nation)
         val over = nation.claims.size - Balance.overextensionLimit(nation)
         if (over > 0) target -= over * 0.5
         val exhaustion = sim.state.warsOf(nation.id).maxOfOrNull { it.exhaustionOf(nation.id) } ?: 0.0

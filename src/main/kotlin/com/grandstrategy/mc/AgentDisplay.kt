@@ -81,6 +81,9 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
     private val codecs = HashMap<Int, VecDeltaCodec>()
     private val outbox = HashMap<UUID, ArrayList<Packet<in ClientGamePacketListener>>>()
     private val templates = HashMap<Int, List<SynchedEntityData.DataValue<*>>>()
+    /** The agent shown as each AI nation's ruler (nation id to agent index), and the name over its head. */
+    private val rulerAgent = HashMap<Int, Int>()
+    private val rulerName = HashMap<Int, String>()
     private var ticks = 0L
 
     var lastNanos = 0L
@@ -131,6 +134,7 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         if (ticks % UPDATE_INTERVAL == 0L) moveNear()
         moveFar()
         walker.tick(hot, 0.05f)
+        if (ticks % RULER_INTERVAL == 0L) refreshRulers()
         flush()
         packetsTotal += packetsLastTick
         lastNanos = System.nanoTime() - start
@@ -402,6 +406,7 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         val box = outbox.getOrPut(player.uuid) { ArrayList() }
         box += ClientboundAddEntityPacket(netId[i], uuid, x.toDouble(), y.toDouble(), z.toDouble(), pitch, yaw, EntityTypes.VILLAGER, 0, Vec3.ZERO, yaw.toDouble())
         box += ClientboundSetEntityDataPacket(netId[i], template(skin[i].toInt()))
+        rulerNameOf(i)?.let { box += ClientboundSetEntityDataPacket(netId[i], nameData(it)) }
         tool(i)?.let { item ->
             box += ClientboundSetEquipmentPacket(netId[i], listOf(com.mojang.datafixers.util.Pair(EquipmentSlot.MAINHAND, ItemStack(item))))
         }
@@ -500,6 +505,91 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         return type * 16 + agents.job[i]
     }
 
+    /**
+     * Every AI-run nation's ruler walks among its people: the adult citizen living nearest the capital carries the
+     * ruler's name and crown mark (♛) over its head. Picked again when it dies or moves away; the name follows each new
+     * ruler, and is taken off when a player takes over.
+     */
+    private fun refreshRulers() {
+        for (nation in rt.state.nations.values) {
+            val name = if (nation.alive) com.grandstrategy.sim.Leaders.describe(nation)?.let { "♛ $it" } else null
+            val current = rulerAgent[nation.id] ?: -1
+            if (name == null) {
+                if (current >= 0) setRuler(nation.id, -1, null)
+                continue
+            }
+            val valid = current >= 0 && current < agents.high && agents.alive[current] && agents.nation[current].toInt() == nation.id &&
+                Job.entries[agents.job[current].toInt()] != Job.CHILD
+            val agent = if (valid) current else pickRuler(nation)
+            if (agent != current || rulerName[nation.id] != name) setRuler(nation.id, agent, name)
+        }
+    }
+
+    private fun pickRuler(nation: com.grandstrategy.sim.Nation): Int {
+        val cx = com.grandstrategy.sim.Chunks.x(nation.capital) * 16 + 8f
+        val cz = com.grandstrategy.sim.Chunks.z(nation.capital) * 16 + 8f
+        var best = -1
+        var bestDistance = Float.MAX_VALUE
+        agents.forEachAlive { i ->
+            if (agents.nation[i].toInt() != nation.id || Job.entries[agents.job[i].toInt()] == Job.CHILD) return@forEachAlive
+            val dx = agents.homeX[i] - cx
+            val dz = agents.homeZ[i] - cz
+            val d = dx * dx + dz * dz
+            if (d < bestDistance) {
+                bestDistance = d
+                best = i
+            }
+        }
+        return best
+    }
+
+    private fun setRuler(nation: Int, agent: Int, name: String?) {
+        val old = rulerAgent[nation] ?: -1
+        if (old >= 0 && old != agent) sendName(old, null)
+        if (agent >= 0 && name != null) {
+            if (agent != old) {
+                com.grandstrategy.GrandStrategy.LOGGER.info("{} is shown as agent {} (home {} {})", name, agents.uid[agent], agents.homeX[agent].toInt(), agents.homeZ[agent].toInt())
+            }
+            rulerAgent[nation] = agent
+            rulerName[nation] = name
+            sendName(agent, name)
+        } else {
+            rulerAgent.remove(nation)
+            rulerName.remove(nation)
+        }
+    }
+
+    private fun rulerNameOf(i: Int): String? {
+        if (i >= agents.high) return null
+        val nation = agents.nation[i].toInt()
+        return if (rulerAgent[nation] == i) rulerName[nation] else null
+    }
+
+    /** Puts the name on (or takes it off) the agent for everyone who sees it now. */
+    private fun sendName(i: Int, name: String?) {
+        if (i >= netId.size || netId[i] == 0) return
+        val data = nameData(name)
+        for ((uuid, seen) in viewers) if (seen.contains(i)) outbox.getOrPut(uuid) { ArrayList() } += ClientboundSetEntityDataPacket(netId[i], data)
+    }
+
+    /** Entity data for a visible custom name, or for none (both values explicitly reset). */
+    private fun nameData(name: String?): List<SynchedEntityData.DataValue<*>> {
+        val named = Villager(EntityTypes.VILLAGER, level)
+        named.customName = net.minecraft.network.chat.Component.literal(name ?: "-")
+        named.isCustomNameVisible = true
+        val values = named.entityData.nonDefaultValues ?: emptyList()
+        if (name != null) return values
+        // To take a name off, send the same two entries with their default values.
+        val ids = values.map { it.id() }.toSet()
+        val plain = Villager(EntityTypes.VILLAGER, level)
+        plain.customName = net.minecraft.network.chat.Component.literal("-")
+        plain.isCustomNameVisible = true
+        plain.entityData.packDirty()
+        plain.customName = null
+        plain.isCustomNameVisible = false
+        return (plain.entityData.packDirty() ?: emptyList()).filter { it.id() in ids }
+    }
+
     private fun template(key: Int): List<SynchedEntityData.DataValue<*>> = templates.getOrPut(key) {
         val types = listOf(VillagerType.DESERT, VillagerType.JUNGLE, VillagerType.PLAINS, VillagerType.SAVANNA, VillagerType.SNOW, VillagerType.SWAMP, VillagerType.TAIGA)
         val job = Job.entries[key % 16]
@@ -540,6 +630,7 @@ class AgentDisplay(private val rt: Runtime, private val population: AgentPopulat
         const val SNAPS_PER_UPDATE = 40
         const val RESYNC_TICKS = 100L
         const val DISTANT = 96f
+        const val RULER_INTERVAL = 100L
         const val BUNDLE_LIMIT = 4000
     }
 }

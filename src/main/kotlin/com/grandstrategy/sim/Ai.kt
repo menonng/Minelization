@@ -106,7 +106,7 @@ object Ai {
             view.atWar -> Posture.WAR
             nation.stability < 35 || (view.pressure[Resource.FOOD] ?: 0.0) > 0.9 -> Posture.CONSOLIDATE
             view.threat > 1.2 || (previous == Posture.ARM && view.threat > 0.9) -> Posture.ARM
-            nation.personality.expansionism > 0.45 && view.frontier != null &&
+            Leaders.temper(nation).expansionism > 0.45 && view.frontier != null &&
                 nation.claims.size < Balance.overextensionLimit(nation) -> Posture.EXPAND
             else -> Posture.GROW
         }
@@ -121,7 +121,7 @@ object Ai {
             // its era. Aggressive rulers lean on the army; underwater building comes slowest.
             Posture.GROW -> TechBranch.entries.minBy { b ->
                 val weight = when (b) {
-                    TechBranch.MILITARY -> 1.3 - 0.6 * nation.personality.aggression
+                    TechBranch.MILITARY -> 1.3 - 0.6 * Leaders.temper(nation).aggression
                     TechBranch.MARINE -> 2.0
                     TechBranch.ADMINISTRATION, TechBranch.LOGISTICS -> 1.1
                     else -> 1.0
@@ -139,7 +139,7 @@ object Ai {
             Posture.WAR, Posture.ARM -> Policy.MILITARY
             Posture.CONSOLIDATE -> Policy.BALANCED
             Posture.EXPAND -> Policy.EXPANSION
-            Posture.GROW -> if ((view.pressure[Resource.GOLD] ?: 0.0) > 0.3) Policy.ECONOMY else if (nation.personality.diplomacy > 0.5) Policy.SCIENCE else Policy.ECONOMY
+            Posture.GROW -> if ((view.pressure[Resource.GOLD] ?: 0.0) > 0.3) Policy.ECONOMY else if (Leaders.temper(nation).diplomacy > 0.5) Policy.SCIENCE else Policy.ECONOMY
         }
         if (policy != nation.policy) {
             nation.policy = policy

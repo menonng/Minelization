@@ -99,6 +99,30 @@ data class RoadTuning(
     val width: Int = 3
 )
 
+/** Rulers of AI-run nations (see [Leaders]). */
+@Serializable
+data class LeaderTuning(
+    /** Turns per year of a ruler's life (a turn is 10 s by default, so 12 makes a year two minutes). */
+    val turnsPerYear: Int = 12,
+    /** Yearly chance of death: [deathBase] at any age, plus a steep rise past [oldAge]. */
+    val deathBase: Double = 0.004,
+    val oldAge: Double = 55.0,
+    val oldAgeSteepness: Double = 0.03,
+    /** Chance the ruler dies when the capital falls. */
+    val capitalFallDeath: Double = 0.25,
+    /** Chance per turn of a coup while stability is below [coupStability]. */
+    val coupChance: Double = 0.004,
+    val coupStability: Double = 20.0,
+    /** Chance a succession is disputed, by kind, plus the stability shortfall below 50 as a fraction. */
+    val disputeHereditary: Double = 0.12,
+    val disputeElective: Double = 0.05,
+    val disputeAppointed: Double = 0.1,
+    /** Nations smaller than this cannot split in a succession war. */
+    val disputeMinClaims: Int = 16,
+    /** How much the ruler's traits weigh against the nation's own character in AI decisions. */
+    val traitWeight: Double = 0.4
+)
+
 /** Administrative districts (see [Districts]). */
 @Serializable
 data class DistrictTuning(
@@ -173,7 +197,8 @@ data class BalanceConfig(
     val agents: AgentTuning = AgentTuning(),
     val roads: RoadTuning = RoadTuning(),
     val capacity: CapacityTuning = CapacityTuning(),
-    val districts: DistrictTuning = DistrictTuning()
+    val districts: DistrictTuning = DistrictTuning(),
+    val leaders: LeaderTuning = LeaderTuning()
 ) {
     fun problems(): List<String> = buildList {
         if (workersPerChunk <= 0) add("workersPerChunk must be > 0")

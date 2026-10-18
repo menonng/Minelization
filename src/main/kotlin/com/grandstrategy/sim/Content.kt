@@ -87,7 +87,13 @@ data class IdeologyDef(
     val science: Double = 0.0,
     val military: Double = 0.0,
     val production: Double = 0.0,
-    val description: String = ""
+    val description: String = "",
+    /**
+     * What its ruler is called, and how the next one is chosen. Left out (as in files written before rulers existed),
+     * the built-in ideology of the same id decides, or "통치자" and inheritance.
+     */
+    val title: String? = null,
+    val succession: Succession? = null
 )
 
 /**
@@ -315,18 +321,18 @@ object Defaults {
     )
 
     val ideologies = listOf(
-        IdeologyDef("animism", "정령신앙", r(), stability = 5.0, description = "자연의 정령을 섬긴다"),
-        IdeologyDef("tribalism", "부족주의", r(), military = 0.05, description = "핏줄과 무리를 앞세운다"),
-        IdeologyDef("theocracy", "신권 정치", r("bronze", techs = listOf("writing")), stability = 10.0, science = -0.05),
-        IdeologyDef("monarchy", "군주제", r("iron", techs = listOf("law")), stability = 6.0, military = 0.05),
-        IdeologyDef("republic", "공화주의", r("classical", techs = listOf("philosophy")), science = 0.1, growth = 0.03),
-        IdeologyDef("feudalism", "봉건제", r("medieval", techs = listOf("feudal_order")), military = 0.1, growth = -0.05),
-        IdeologyDef("liberalism", "자유주의", r("industrial", techs = listOf("printing")), growth = 0.1, science = 0.1, stability = -5.0),
-        IdeologyDef("socialism", "사회주의", r("industrial", techs = listOf("printing")), stability = 5.0, growth = 0.05, production = -0.05),
-        IdeologyDef("communism", "공산주의", r("modern"), production = 0.1, science = -0.05, stability = -3.0),
-        IdeologyDef("fascism", "파시즘", r("modern"), military = 0.2, stability = -8.0, growth = -0.05),
-        IdeologyDef("technocracy", "기술관료제", r("information", techs = listOf("computers")), science = 0.25, stability = -4.0),
-        IdeologyDef("transhumanism", "트랜스휴머니즘", r("near_future", techs = listOf("robotics")), growth = 0.15, science = 0.15),
-        IdeologyDef("ai_governance", "AI 통치", r("far_future", techs = listOf("nanotech")), production = 0.2, stability = 10.0, growth = -0.1)
+        IdeologyDef("animism", "정령신앙", r(), stability = 5.0, description = "자연의 정령을 섬긴다", title = "족장", succession = Succession.ELECTIVE),
+        IdeologyDef("tribalism", "부족주의", r(), military = 0.05, description = "핏줄과 무리를 앞세운다", title = "족장", succession = Succession.HEREDITARY),
+        IdeologyDef("theocracy", "신권 정치", r("bronze", techs = listOf("writing")), stability = 10.0, science = -0.05, title = "대사제", succession = Succession.ELECTIVE),
+        IdeologyDef("monarchy", "군주제", r("iron", techs = listOf("law")), stability = 6.0, military = 0.05, title = "왕", succession = Succession.HEREDITARY),
+        IdeologyDef("republic", "공화주의", r("classical", techs = listOf("philosophy")), science = 0.1, growth = 0.03, title = "집정관", succession = Succession.ELECTIVE),
+        IdeologyDef("feudalism", "봉건제", r("medieval", techs = listOf("feudal_order")), military = 0.1, growth = -0.05, title = "왕", succession = Succession.HEREDITARY),
+        IdeologyDef("liberalism", "자유주의", r("industrial", techs = listOf("printing")), growth = 0.1, science = 0.1, stability = -5.0, title = "대통령", succession = Succession.ELECTIVE),
+        IdeologyDef("socialism", "사회주의", r("industrial", techs = listOf("printing")), stability = 5.0, growth = 0.05, production = -0.05, title = "수상", succession = Succession.ELECTIVE),
+        IdeologyDef("communism", "공산주의", r("modern"), production = 0.1, science = -0.05, stability = -3.0, title = "서기장", succession = Succession.APPOINTED),
+        IdeologyDef("fascism", "파시즘", r("modern"), military = 0.2, stability = -8.0, growth = -0.05, title = "총통", succession = Succession.APPOINTED),
+        IdeologyDef("technocracy", "기술관료제", r("information", techs = listOf("computers")), science = 0.25, stability = -4.0, title = "의장", succession = Succession.APPOINTED),
+        IdeologyDef("transhumanism", "트랜스휴머니즘", r("near_future", techs = listOf("robotics")), growth = 0.15, science = 0.15, title = "의장", succession = Succession.ELECTIVE),
+        IdeologyDef("ai_governance", "AI 통치", r("far_future", techs = listOf("nanotech")), production = 0.2, stability = 10.0, growth = -0.1, title = "관리 AI", succession = Succession.APPOINTED)
     )
 }

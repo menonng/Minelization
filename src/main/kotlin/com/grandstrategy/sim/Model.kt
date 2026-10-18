@@ -185,6 +185,31 @@ data class Personality(
     val diplomacy: Double
 )
 
+/** How a nation's next ruler is chosen (set by its ideology, see content.json). */
+@Serializable
+enum class Succession(val label: String) {
+    HEREDITARY("세습"),
+    ELECTIVE("선출"),
+    APPOINTED("지명")
+}
+
+/**
+ * The person who rules an AI-run nation (see [Leaders]). Traits run 0..1: aggression, diplomacy, greed and wisdom.
+ * [born] and [crowned] are turns; [regnal] is the ordinal among rulers of the same name and house ("3세").
+ */
+@Serializable
+class Leader(
+    val name: String,
+    val house: String,
+    val regnal: Int,
+    val born: Long,
+    val crowned: Long,
+    val aggression: Double,
+    val diplomacy: Double,
+    val greed: Double,
+    val wisdom: Double
+)
+
 @Serializable
 class Nation(
     val id: Int,
@@ -224,7 +249,12 @@ class Nation(
     var crowdPenalty: Double = 0.0,
     var crowdPenaltyTurns: Int = 0,
     /** Turn the capital last fell, so a lost capital is announced with a cutscene only once in a while. */
-    var capitalFellTurn: Long = -1000
+    var capitalFellTurn: Long = -1000,
+    /** The ruling character of an AI-run nation (none while a player rules it), and the names of earlier rulers. */
+    var leader: Leader? = null,
+    val pastLeaders: MutableList<String> = mutableListOf(),
+    /** How many rulers of each house and name there have been, for "3세". */
+    val regnalCounts: MutableMap<String, Int> = mutableMapOf()
 ) {
     val aiControlled: Boolean get() = ruler == null || autoGovern
 

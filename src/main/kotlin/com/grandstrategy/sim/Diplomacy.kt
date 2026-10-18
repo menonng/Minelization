@@ -17,7 +17,7 @@ object Diplomacy {
                     o -= hit
                     sim.log(EventKind.DIPLOMACY, "${a.name}와(과) ${b.name}의 국경에서 분쟁이 일어났다 (호감도 -${hit.toInt()})", a.id, b.id)
                 }
-            } else if (a.personality.diplomacy + b.personality.diplomacy > 0.8) {
+            } else if (Leaders.temper(a).diplomacy + Leaders.temper(b).diplomacy > 0.8) {
                 o += 0.3
             }
             if (r.has(Treaty.TRADE, state.turn)) o += 0.5
@@ -25,7 +25,7 @@ object Diplomacy {
             if (r.has(Treaty.NON_AGGRESSION, state.turn)) o += 0.2
             if (state.warBetween(a.id, b.id) != null) o -= 2.0
             if (state.enemiesOf(a.id).intersect(state.enemiesOf(b.id)).isNotEmpty()) o += 1.0
-            o += 0.3 * ((a.personality.diplomacy + b.personality.diplomacy) / 2.0 - 0.5)
+            o += 0.3 * ((Leaders.temper(a).diplomacy + Leaders.temper(b).diplomacy) / 2.0 - 0.5)
             r.opinion = o.coerceIn(-100.0, 100.0)
             r.treaties.entries.removeIf { it.value in 0..state.turn }
         }
@@ -48,7 +48,7 @@ object Diplomacy {
     fun aiAccepts(sim: Simulation, target: Nation, from: Nation, treaty: Treaty): Boolean {
         val state = sim.state
         if (state.warBetween(target.id, from.id) != null) return false
-        val o = opinion(sim, target.id, from.id) + (target.personality.diplomacy - 0.5) * 20
+        val o = opinion(sim, target.id, from.id) + (Leaders.temper(target).diplomacy - 0.5) * 20
         val threat = threatFrom(sim, target, from)
         return when (treaty) {
             Treaty.NON_AGGRESSION -> o > -10 && (threat > 0.8 || o > 15)
