@@ -109,10 +109,16 @@ class RoadsTest {
         for (z in -64..64) heights[Chunks.pack(1, z)] = 67
         val ground = Flat(heights)
         val line = (0..5).map { Chunks.pack(0, it) }
-        val wide = RoadPathfinder.widen(line, 2, ground) { _, _ -> false }
-        assertEquals(line.size, wide.size, "the +x side is a 3-block step, so nothing is added")
-        val flatWide = RoadPathfinder.widen((0..5).map { Chunks.pack(it, 10) }, 2, Flat()) { _, _ -> false }
-        assertEquals(12, flatWide.size)
+        val wide = RoadPathfinder.widen(line, 3, ground) { _, _ -> false }
+        assertTrue(wide.none { Chunks.x(it) == 1 }, "the +x side is a 3-block step, so nothing is added there")
+        // The -x side (8 columns, with the ends) and one column past each end of the line.
+        assertEquals(line.size + 8 + 2, wide.size)
+        val flatWide = RoadPathfinder.widen((0..5).map { Chunks.pack(it, 10) }, 3, Flat()) { _, _ -> false }
+        assertEquals(8 * 3, flatWide.size, "three wide, and a column past each end so corners come out full")
+        assertEquals(setOf(9, 10, 11), flatWide.map { Chunks.z(it) }.toSet())
+        // A wall beside the road narrows it there instead of stopping it.
+        val walled = RoadPathfinder.widen((0..5).map { Chunks.pack(it, 10) }, 3, Flat()) { x, z -> z == 11 && x in 2..3 }
+        assertEquals(8 * 3 - 2, walled.size)
         val plaza = RoadPathfinder.plaza(10, 10, 2, Flat()) { _, _ -> false }
         assertEquals(21, plaza.size)
     }

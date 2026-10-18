@@ -172,7 +172,8 @@ class MenuService(private val rt: Runtime) {
                 recruitCost = Balance.recruitCost(n, 5), wars = state.warsOf(n.id).size,
                 flag = n.flag, era = content.era(n).name, eraIndex = content.eraIndex(n), eraCount = content.eras.size,
                 techTotal = content.techTotal(n), nextEraAt = content.eras.getOrNull(content.eraIndex(n) + 1)?.techTotal ?: content.techTotal(n),
-                weapon = content.weapon(n).name, energy = content.energySource(n).name, ideology = content.ideologyOf(n)?.name ?: ""
+                weapon = content.weapon(n).name, energy = content.energySource(n).name, ideology = content.ideologyOf(n)?.name ?: "",
+                districts = com.grandstrategy.sim.Districts.ofNation(rt.state, n).size, districtLimit = com.grandstrategy.sim.Districts.limit(n)
             )
         }
         val nations = state.alive().filter { it.id != mine?.id }.map { n ->

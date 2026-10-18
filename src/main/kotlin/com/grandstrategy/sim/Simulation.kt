@@ -70,6 +70,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         Ai.run(this)
         Warfare.run(this)
         Politics.run(this)
+        Districts.ensure(this)
         expireProposals()
     }
 
@@ -145,13 +146,16 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         val previous = state.owners[chunk]
         if (previous == nation.id) return
         previous?.let { state.nations[it]?.claims?.remove(chunk) }
+        Districts.lost(this, chunk)
         state.owners[chunk] = nation.id
         nation.claims += chunk
+        Districts.claimed(this, chunk, nation)
     }
 
     fun release(chunk: Long) {
         val previous = state.owners.remove(chunk) ?: return
         state.nations[previous]?.claims?.remove(chunk)
+        Districts.lost(this, chunk)
     }
 
     fun destroy(nation: Nation, reason: String, by: Int? = null) {
@@ -159,6 +163,7 @@ class Simulation(val state: WorldState, private val terrainProvider: TerrainProv
         nation.alive = false
         for (chunk in nation.claims.toList()) state.owners.remove(chunk)
         nation.claims.clear()
+        Districts.dissolve(state, nation)
         for (settlement in state.settlements.values) {
             if (settlement.owner == nation.id) {
                 settlement.owner = null

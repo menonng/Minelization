@@ -3,6 +3,7 @@ package com.grandstrategy.mc.map
 import com.grandstrategy.GrandStrategy
 import com.grandstrategy.mc.Runtime
 import com.grandstrategy.mc.Texts
+import com.grandstrategy.net.MapDistrict
 import com.grandstrategy.net.MapInfo
 import com.grandstrategy.net.MapNation
 import com.grandstrategy.net.MapPlayer
@@ -200,19 +201,20 @@ class MapTileStore(private val rt: Runtime) {
             val t = tile(key, create = false)
             val owners = IntArray(64)
             val flags = IntArray(64)
+            val districts = IntArray(64)
             for (dz in 0 until 8) for (dx in 0 until 8) {
                 val chunk = Chunks.pack(Chunks.x(key) * 8 + dx, Chunks.z(key) * 8 + dz)
                 owners[dz * 8 + dx] = rt.state.owners[chunk] ?: 0
                 flags[dz * 8 + dx] = if (rt.state.settlementLand.containsKey(chunk)) 1 else 0
+                districts[dz * 8 + dx] = rt.state.districtOf[chunk] ?: 0
             }
-            if (t == null) {
-                out += MapTileData(key, 0, null, owners.toList(), flags.toList())
-            } else if (t.version != known && budget < 24) {
+            val pixels = if (t != null && t.version != known && budget < 24) {
                 budget++
-                out += MapTileData(key, t.version, Base64.getEncoder().encodeToString(t.pixels), owners.toList(), flags.toList())
+                Base64.getEncoder().encodeToString(t.pixels)
             } else {
-                out += MapTileData(key, t.version, null, owners.toList(), flags.toList())
+                null
             }
+            out += MapTileData(key, t?.version ?: 0, pixels, owners.toList(), flags.toList(), districts.toList())
         }
         send(player, MapTiles(out))
     }
@@ -227,7 +229,8 @@ class MapTileStore(private val rt: Runtime) {
         val players = rt.server.playerList.players.filter { it.level() == level }.map {
             MapPlayer(it.gameProfile.name(), it.x, it.z, it.yRot, rt.citizenNation(it)?.id ?: 0, it.uuid == player.uuid)
         }
-        send(player, MapInfo(open, border.centerX, border.centerZ, border.size, nations, towns, players, chunksColored))
+        val districts = rt.state.districts.values.map { MapDistrict(it.id, it.nation, it.name, it.seat, it.size) }
+        send(player, MapInfo(open, border.centerX, border.centerZ, border.size, nations, towns, players, chunksColored, districts))
     }
 
     private fun send(player: ServerPlayer, message: ToClient) {

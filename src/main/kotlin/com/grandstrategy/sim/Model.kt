@@ -66,7 +66,24 @@ class Road(
     val nation: Int,
     val kind: RoadKind,
     val cells: MutableList<Long> = mutableListOf(),
-    var built: Boolean = false
+    var built: Boolean = false,
+    /** Laid three blocks wide; roads from before that are widened once by the road planner. */
+    var wide: Boolean = false
+)
+
+/**
+ * An administrative district: part of a nation's land run from one seat. Every owned chunk belongs to exactly one;
+ * how many a district can hold grows with research, and land past that forms a new district (see [Districts]).
+ */
+@Serializable
+class District(
+    val id: Int,
+    var nation: Int,
+    var name: String,
+    /** The chunk the district is run from; its town core (plaza) is laid nearby. */
+    var seat: Long,
+    var size: Int = 0,
+    val foundedTurn: Long = 0
 )
 
 @Serializable
@@ -137,8 +154,8 @@ enum class TechBranch(val label: String, val effect: String) {
     AGRICULTURE("농업", "식량 +10%"),
     MINING("광업", "석재·철·금 +10%"),
     INDUSTRY("산업", "목재 +5%, 시설 효율 +5%"),
-    LOGISTICS("물류", "확장 비용 -8%, 보급 +5%"),
-    ADMINISTRATION("행정", "안정도 +3, 과확장 한도 +5"),
+    LOGISTICS("물류", "확장 비용 -8%, 보급 +5%, 행정구역 +2청크"),
+    ADMINISTRATION("행정", "안정도 +3, 과확장 한도 +5, 행정구역 +4청크"),
     EDUCATION("교육", "연구 속도 +15%"),
     MILITARY("군사", "전투력 +10%"),
     CONSTRUCTION("건설", "시설 비용 -8%, 성벽 +5%"),
@@ -313,7 +330,11 @@ class WorldState(
     var nextRoadId: Int = 1,
     val roads: MutableMap<Int, Road> = linkedMapOf(),
     /** Columns a player took road out of; automatic planning never paves them again. */
-    val roadBans: MutableSet<Long> = mutableSetOf()
+    val roadBans: MutableSet<Long> = mutableSetOf(),
+    var nextDistrictId: Int = 1,
+    val districts: MutableMap<Int, District> = linkedMapOf(),
+    /** Which district each owned chunk belongs to. */
+    val districtOf: MutableMap<Long, Int> = mutableMapOf()
 ) {
     fun alive(): List<Nation> = nations.values.filter { it.alive }
 

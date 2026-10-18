@@ -183,22 +183,22 @@ object RoadPathfinder {
     }
 
     /**
-     * Widens a path to [width] columns by adding neighbours on one side of the direction of travel.
-     * Columns that are blocked, unknown or more than one block off the path's height are skipped.
+     * Lays a planned line [width] blocks wide: every column within width / 2 of the line, a square brush, so straight
+     * runs come out [width] wide and corners full. Columns that are blocked, unknown, impassable or more than one block
+     * off the line's height beside them are skipped (the road narrows past a wall or a ledge).
      */
     fun widen(path: List<Long>, width: Int, ground: RoadGround, blocked: (Int, Int) -> Boolean): List<Long> {
-        if (width <= 1 || path.size < 2) return path
+        val r = width / 2
+        if (r <= 0) return path
         val out = LinkedHashSet<Long>(path)
-        for (k in path.indices) {
-            val a = path[maxOf(0, k - 1)]
-            val b = path[minOf(path.size - 1, k + 1)]
-            val alongX = Chunks.x(a) != Chunks.x(b)
-            val x = Chunks.x(path[k])
-            val z = Chunks.z(path[k])
+        for (cell in path) {
+            val x = Chunks.x(cell)
+            val z = Chunks.z(cell)
             val y = ground.height(x, z) ?: continue
-            for (w in 1 until width) {
-                val nx = if (alongX) x else x + w
-                val nz = if (alongX) z + w else z
+            for (dx in -r..r) for (dz in -r..r) {
+                if (dx == 0 && dz == 0) continue
+                val nx = x + dx
+                val nz = z + dz
                 if (blocked(nx, nz)) continue
                 val ny = ground.height(nx, nz) ?: continue
                 if ((ground.exact(nx, nz) && abs(ny - y) > 1) || ground.cost(nx, nz) == Double.POSITIVE_INFINITY) continue

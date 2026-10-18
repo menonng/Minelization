@@ -16,4 +16,7 @@ object Names {
     fun rebel(rng: Random): String = "${root(rng)} 자유국"
 
     fun settlement(rng: Random): String = root(rng) + " " + villageTails.random(rng)
+
+    /** An administrative district: a place name with a province word. */
+    fun district(rng: Random): String = root(rng) + " " + listOf("주", "군", "현", "도").random(rng)
 }

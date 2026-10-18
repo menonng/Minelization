@@ -155,6 +155,19 @@ object GsCommands {
                 }
                 reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
             })
+            .then(literal("districts").executes { ctx ->
+                val r = rt()
+                val nations = ctx.source.player?.let { r.citizenNation(it) }?.let { listOf(it) } ?: r.state.alive()
+                val text = nations.joinToString("\n") { n ->
+                    val list = com.grandstrategy.sim.Districts.ofNation(r.state, n).sortedBy { it.id }
+                    "${n.name}: 행정구역 ${list.size}개 · 구역당 최대 ${com.grandstrategy.sim.Districts.limit(n)}청크 (행정·물류 연구로 늘어남)\n" +
+                        list.joinToString("\n") { d ->
+                            val core = if (com.grandstrategy.sim.Districts.hasCore(r.state, d)) "중심 광장 있음" else "중심 광장 없음"
+                            "  ${d.name}: ${d.size}청크 · 중심 ${com.grandstrategy.sim.Chunks.format(d.seat)} · $core"
+                        }
+                }
+                reply(ctx, Texts.prefix().append(Texts.plain(text, ChatFormatting.WHITE)))
+            })
             .then(literal("chest").executes { ctx -> NationScreen(ctx.source.playerOrException, rt()).open(); 1 })
             .then(literal("menu").then(argument("page", StringArgumentType.word())
                 .suggests { _, b -> SharedSuggestionProvider.suggest(listOf("overview", "map", "diplomacy", "research", "log"), b) }

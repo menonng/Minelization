@@ -619,6 +619,7 @@ class NationMenuScreen(private var view: MenuView) : Screen(Component.literal("�
         stat(col2, cy + 70, colW, Items.ENCHANTED_BOOK, "연구", "${n.researchFocus.label} ${n.tech[n.researchFocus] ?: 0}→${(n.tech[n.researchFocus] ?: 0) + 1}",
             n.researchProgress / n.researchCost.coerceAtLeast(1.0), 0x8A5AD0)
         stat(cx, cy + 100, colW, Items.FILLED_MAP, "영토", "${n.claims} 청크 (과확장 ${n.claimLimit})", n.claims.toDouble() / n.claimLimit.coerceAtLeast(1), 0xC89A4A)
+        if (n.districts > 0) ink(g, "행정구역 ${n.districts}개 · 구역당 ${n.districtLimit}청크까지", cx + 22, cy + 119, 0x6B5A44)
         ink(g, "자세 ${n.posture.label}", col2 + 126, cy + 104, 0x6B5A44)
         view.proposals.take(2).forEachIndexed { k, p ->
             val y = cy + 124 + k * 22

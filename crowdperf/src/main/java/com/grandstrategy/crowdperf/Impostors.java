@@ -59,6 +59,8 @@ public final class Impostors {
     }
 
     private static int ticks;
+    /** An Iris shader pack is on: villagers are drawn normally (see {@link ShaderPacks}). */
+    private static boolean shaderPack;
     private static boolean anyBatched;
     /** Bumped when the atlas is cleared, so cached slots are looked up again. */
     private static int generation;
@@ -81,7 +83,8 @@ public final class Impostors {
             clearGroups();
             return;
         }
-        if (!config.batch || renderer.broken()) {
+        shaderPack = ShaderPacks.inUse();
+        if (!config.batch || renderer.broken() || shaderPack) {
             if (anyBatched) release(level);
             clearGroups();
             return;
@@ -198,7 +201,7 @@ public final class Impostors {
 
     /** Culls and uploads the crowd for this frame; called after the level is extracted, before the render passes. */
     public static void cull(net.minecraft.client.Camera camera) {
-        if (!CrowdPerf.config().batch) return;
+        if (!CrowdPerf.config().batch || shaderPack) return;
         Vec3 pos = camera.position();
         renderer.cull(camera.getCullFrustum(), groups, CrowdPerf.config().frustumCulling, pos.x, pos.y, pos.z, camera.yRot(), camera.xRot());
     }
@@ -332,7 +335,7 @@ public final class Impostors {
 
     /** Draws the crowd; called inside the solid pass of the main render target. */
     public static void draw(RenderPass pass) {
-        if (!CrowdPerf.config().batch) return;
+        if (!CrowdPerf.config().batch || shaderPack) return;
         renderer.draw(pass, groups, ImpostorAtlas.ID, 1.0F / ImpostorAtlas.COLUMNS);
     }
 
@@ -341,7 +344,7 @@ public final class Impostors {
         int quads = 0;
         for (CrowdRenderer.Group g : groups) quads += g.visible * g.quads;
         return "batched " + lastBatched + " + hidden " + lastHidden + " (normal: near " + lastNear + ", special " + lastSpecial + ", other " + lastOther + "), in view " + renderer.lastVisible + " in " + renderer.lastCells + " cells, quads " + quads + ", build " + avg + " µs avg over " + builds + ", looks " + atlas.size()
-            + (renderer.broken() ? ", SHADER FAILED" : "");
+            + (renderer.broken() ? ", SHADER FAILED" : "") + (shaderPack ? ", shader pack on: villagers drawn normally" : "");
     }
 
     static void resetStats() {

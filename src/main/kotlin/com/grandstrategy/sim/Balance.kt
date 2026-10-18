@@ -93,17 +93,23 @@ data class RoadTuning(
     val streetNodes: Int = 12000,
     val highwayNodes: Int = 40000,
     val workers: Int = 4,
-    /**
-     * A town core counts as full at this many buildings within [districtRadius] blocks of its plaza; when every core
-     * is full, a new district is founded. AI nations had 14 to 28 buildings after 3,500 turns, so 24 almost never fired.
-     */
-    val districtBuildings: Int = 16,
+    /** New houses prefer the town core with the fewest buildings within this many blocks of its plaza. */
     val districtRadius: Int = 48,
-    /** Districts are at least this many chunks from other town cores, and at most [districtReach] from the nearest. */
-    val districtSpacing: Int = 5,
-    val districtReach: Int = 12,
-    /** One district per this many claimed chunks (plus the capital). */
-    val chunksPerDistrict: Int = 50
+    /** Roads are laid this many blocks wide (odd; the planned line runs down the middle). */
+    val width: Int = 3
+)
+
+/** Administrative districts (see [Districts]). */
+@Serializable
+data class DistrictTuning(
+    /** Chunks one district can hold with no research. */
+    val baseChunks: Int = 16,
+    /** Extra chunks per level of administration and of logistics research. */
+    val perAdministration: Double = 4.0,
+    val perLogistics: Double = 2.0,
+    val maxChunks: Int = 160,
+    /** A district gets its own town core (plaza, and a highway to the rest of the roads) once it holds this many chunks. */
+    val coreAtChunks: Int = 4
 )
 
 @Serializable
@@ -166,7 +172,8 @@ data class BalanceConfig(
     val ai: AiTuning = AiTuning(),
     val agents: AgentTuning = AgentTuning(),
     val roads: RoadTuning = RoadTuning(),
-    val capacity: CapacityTuning = CapacityTuning()
+    val capacity: CapacityTuning = CapacityTuning(),
+    val districts: DistrictTuning = DistrictTuning()
 ) {
     fun problems(): List<String> = buildList {
         if (workersPerChunk <= 0) add("workersPerChunk must be > 0")
@@ -177,7 +184,10 @@ data class BalanceConfig(
         if (agents.perPopulation < 0 || agents.max < 0 || agents.spawnPerTurn < 0) add("agents values must be >= 0")
         if (agents.visibleRadius !in 8..128 || agents.maxVisiblePerPlayer !in 0..1000) add("agents.visibleRadius 8..128, agents.maxVisiblePerPlayer 0..1000")
         if (ai.economicActionsPerTurn < 0 || ai.strategicActionsPerTurn < 0) add("ai action counts must be >= 0")
-        if (roads.districtBuildings < 1 || roads.districtRadius < 8 || roads.chunksPerDistrict < 1) add("roads.districtBuildings >= 1, roads.districtRadius >= 8, roads.chunksPerDistrict >= 1")
+        if (roads.districtRadius < 8 || roads.width < 1 || roads.width % 2 == 0) add("roads.districtRadius >= 8, roads.width는 1 이상 홀수")
+        if (districts.baseChunks < 1 || districts.maxChunks < districts.baseChunks || districts.coreAtChunks < 1) {
+            add("districts.baseChunks >= 1, maxChunks >= baseChunks, coreAtChunks >= 1")
+        }
         val numbers = listOf(startPopulation, startMilitary, housingPerChunk, foodPerPop, growthRate, starvationLoss, storageBase)
         if (numbers.any { it.isNaN() || it < 0 }) add("start and economy values must be non-negative numbers")
         if (facilityCost.values.any { cost -> cost.values.any { it < 0 } } || claimCost.values.any { it < 0 }) add("costs must be >= 0")

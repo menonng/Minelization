@@ -71,7 +71,9 @@ object GrandStrategyClient : ClientModInitializer {
             com.grandstrategy.client.ui.WorldMap.clear()
         }
         ClientPlayNetworking.registerGlobalReceiver(ServerMessagePayload.TYPE) { payload, _ ->
-            val message = runCatching { WorkJson.json.decodeFromString(ToClient.serializer(), payload.json) }.getOrNull()
+            val message = runCatching { WorkJson.json.decodeFromString(ToClient.serializer(), payload.json) }
+                .onFailure { com.grandstrategy.GrandStrategy.LOGGER.warn("Could not read a server message ({} chars, {}): {}", payload.json.length, payload.json.take(40), it.toString()) }
+                .getOrNull()
             when (message) {
                 is com.grandstrategy.net.MenuView -> com.grandstrategy.client.ui.NationMenu.onView(message)
                 is com.grandstrategy.net.MapInfo -> com.grandstrategy.client.ui.WorldMap.onInfo(message)

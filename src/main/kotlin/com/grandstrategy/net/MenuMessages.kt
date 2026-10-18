@@ -49,7 +49,10 @@ data class NationCard(
     val nextEraAt: Int = 0,
     val weapon: String = "",
     val energy: String = "",
-    val ideology: String = ""
+    val ideology: String = "",
+    /** Administrative districts and how many chunks one can hold. */
+    val districts: Int = 0,
+    val districtLimit: Int = 0
 )
 
 @Serializable
@@ -154,13 +157,17 @@ data class SetupOffer(val tiers: List<SetupTier>, val current: Int, val chunky: 
 data class SetupDone(val size: Int) : ToClient()
 
 @Serializable
-data class MapTileData(val key: Long, val version: Int, val pixels: String?, val owners: List<Int>, val flags: List<Int>)
+data class MapTileData(val key: Long, val version: Int, val pixels: String?, val owners: List<Int>, val flags: List<Int>, val districts: List<Int> = emptyList())
 
 @Serializable
 data class MapNation(val id: Int, val name: String, val color: Int, val dye: Int, val capital: Long, val claims: Int, val flag: com.grandstrategy.sim.Flag? = null)
 
 @Serializable
 data class MapTown(val id: Int, val name: String, val center: Long, val owner: Int)
+
+/** An administrative district, for its name on the map. */
+@Serializable
+data class MapDistrict(val id: Int, val nation: Int, val name: String, val seat: Long, val size: Int)
 
 @Serializable
 data class MapPlayer(val name: String, val x: Double, val z: Double, val yaw: Float, val nation: Int, val self: Boolean)
@@ -187,5 +194,6 @@ data class MapInfo(
     val nations: List<MapNation>,
     val towns: List<MapTown>,
     val players: List<MapPlayer>,
-    val colored: Long
+    val colored: Long,
+    val districts: List<MapDistrict> = emptyList()
 ) : ToClient()

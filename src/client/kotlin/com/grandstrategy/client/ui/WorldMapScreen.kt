@@ -32,7 +32,7 @@ object WorldMap {
     private val openKey = KeyMappingHelper.registerKeyMapping(KeyMapping("key.grandstrategy.world_map", InputConstants.KEY_M, category))
 
     /** [version] is what the texture shows, [latest] what the server last reported; they differ while pixels are still owed. */
-    class ClientTile(val key: Long, var version: Int, var latest: Int, var texture: Identifier?, var owners: IntArray, var flags: IntArray)
+    class ClientTile(val key: Long, var version: Int, var latest: Int, var texture: Identifier?, var owners: IntArray, var flags: IntArray, var districts: IntArray = IntArray(64))
 
     const val MIN_ZOOM = 1.0 / 32
     const val MAX_ZOOM = 8.0
@@ -78,6 +78,14 @@ object WorldMap {
             var z = MIN_ZOOM
             while (z * 2 <= fit && z < MAX_ZOOM) z *= 2
             zoom = z
+            // Capture runs can start zoomed in on the player (-Dgrandstrategy.mapZoom=0.5) to check close-up drawing.
+            System.getProperty("grandstrategy.mapZoom")?.toDoubleOrNull()?.let { forced ->
+                zoom = forced.coerceIn(MIN_ZOOM, MAX_ZOOM)
+                mc.player?.let {
+                    centerX = it.x
+                    centerZ = it.z
+                }
+            }
         }
         if (message.open && mc.gui.screen() !is WorldMapScreen) {
             if (!centered) {
@@ -97,6 +105,7 @@ object WorldMap {
             val tile = tiles.getOrPut(data.key) { ClientTile(data.key, 0, 0, null, IntArray(64), IntArray(64)) }
             tile.owners = data.owners.toIntArray()
             tile.flags = data.flags.toIntArray()
+            tile.districts = if (data.districts.size == 64) data.districts.toIntArray() else IntArray(64)
             tile.latest = data.version
             val pixels = data.pixels ?: continue
             val bytes = Base64.getDecoder().decode(pixels)
@@ -133,6 +142,7 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
     private var refreshCursor = 0
     private var showBorders = true
     private var showLabels = true
+    private var showDistricts = true
     private val mapLeft get() = 8
     private val mapTop get() = 30
     private val mapRight get() = width - 8
@@ -167,6 +177,10 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
         val borders = IconButton(x, 6, 22, 18, Component.literal(""), Items.BANNER.white(), { showBorders }) { showBorders = !showBorders }
         borders.setTooltip(Tooltip.create(Component.literal("국경 표시")))
         addRenderableWidget(borders)
+        x -= 26
+        val districts = IconButton(x, 6, 22, 18, Component.literal(""), Items.FILLED_MAP, { showDistricts }) { showDistricts = !showDistricts }
+        districts.setTooltip(Tooltip.create(Component.literal("행정구역 표시")))
+        addRenderableWidget(districts)
     }
 
     private fun tool(x: Int, item: net.minecraft.world.item.Item, tip: String, action: () -> Unit) {
@@ -289,6 +303,7 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
         drawBorder(g)
         drawMarkers(g)
         if (showLabels) drawLabels(g)
+        if (showBorders) drawDistrictNames(g)
         drawPlayers(g)
         g.disableScissor()
         frame(g)
@@ -332,6 +347,11 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
         return tile.owners[(Chunks.z(chunk) and 7) * 8 + (Chunks.x(chunk) and 7)]
     }
 
+    private fun districtAt(chunk: Long): Int {
+        val tile = WorldMap.tiles[Chunks.pack(Chunks.x(chunk) shr 3, Chunks.z(chunk) shr 3)] ?: return 0
+        return tile.districts[(Chunks.z(chunk) and 7) * 8 + (Chunks.x(chunk) and 7)]
+    }
+
     private fun drawTerritory(g: GuiGraphicsExtractor) {
         val nations = WorldMap.info?.nations?.associateBy { it.id } ?: return
         val (tx0, tz0, tx1, tz1) = (visibleTiles() ?: return).toList()
@@ -373,6 +393,33 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
                         val b = (kx + c).roundToInt()
                         if (ownerAt(Chunks.pack(k, cz - 1)) != owner) g.fill(a, y0, b, y0 + w, edge)
                         if (ownerAt(Chunks.pack(k, cz + 1)) != owner) g.fill(a, y1 - w, b, y1, edge)
+                    }
+                }
+                // Inside the nation, a faint dotted line where one administrative district meets another.
+                if (showDistricts && c >= 3) {
+                    val line = Ui.argb(Ui.lighten(color, 70), 150)
+                    for (k in cx..end) {
+                        val d = districtAt(Chunks.pack(k, cz))
+                        if (d == 0) continue
+                        val kx = toScreen(k * 16.0, 0.0).first
+                        val a = kx.roundToInt()
+                        val b = (kx + c).roundToInt()
+                        val right = Chunks.pack(k + 1, cz)
+                        if (ownerAt(right) == owner && districtAt(right) != d) {
+                            var yy = y0
+                            while (yy < y1) {
+                                g.fill(b - 1, yy, b, minOf(yy + 2, y1), line)
+                                yy += 4
+                            }
+                        }
+                        val below = Chunks.pack(k, cz + 1)
+                        if (ownerAt(below) == owner && districtAt(below) != d) {
+                            var xx = a
+                            while (xx < b) {
+                                g.fill(xx, y1 - 1, minOf(xx + 2, b), y1, line)
+                                xx += 4
+                            }
+                        }
                     }
                 }
                 cx = end + 1
@@ -462,6 +509,26 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
         }
     }
 
+    /** District names at their seats, once zoomed in far enough to read them. */
+    private fun drawDistrictNames(g: GuiGraphicsExtractor) {
+        val info = WorldMap.info ?: return
+        if (!showDistricts || !showLabels || 16 * WorldMap.zoom < 6) return
+        val nations = info.nations.associateBy { it.id }
+        for (d in info.districts) {
+            val n = nations[d.nation] ?: continue
+            val (sx, sy) = toScreen(Chunks.x(d.seat) * 16 + 8.0, Chunks.z(d.seat) * 16 + 8.0)
+            if (sx < mapLeft || sx > mapRight || sy < mapTop || sy > mapBottom) continue
+            val pose = g.pose()
+            pose.pushMatrix()
+            pose.translate(sx.toFloat(), sy.toFloat() - 14)
+            pose.scale(0.75f, 0.75f)
+            val w = font.width(d.name)
+            g.fill(-w / 2 - 2, -5, w / 2 + 2, 5, Ui.argb(0x000000, 90))
+            g.text(font, Component.literal(d.name), -w / 2, -4, Ui.argb(Ui.lighten(n.color, 80)), true)
+            pose.popMatrix()
+        }
+    }
+
     private fun drawPlayers(g: GuiGraphicsExtractor) {
         val info = WorldMap.info ?: return
         val mc = Minecraft.getInstance()
@@ -493,8 +560,9 @@ class WorldMapScreen : Screen(Component.literal("세계 지도")) {
             parts += "X ${floor(wx).toInt()}  Z ${floor(wz).toInt()}"
             val owner = ownerAt(chunk)
             val name = info?.nations?.firstOrNull { it.id == owner }?.name
+            val district = districtAt(chunk).takeIf { it != 0 }?.let { id -> info?.districts?.firstOrNull { it.id == id } }
             parts += when {
-                name != null -> "$name 영토"
+                name != null -> "$name 영토" + (district?.let { " · ${it.name} (${it.size}청크)" } ?: "")
                 owner == 0 -> "무주지"
                 else -> "아직 그려지지 않은 곳"
             }

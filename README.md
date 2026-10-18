@@ -60,6 +60,7 @@
 | `/gs setup [크기] [미리생성] [조물주]` · `/gs admin pregen status|cancel` | 세계 준비 (OP) |
 | `/gs mode spectator|adventure` | 조물주 모드에서 관전/모험 전환 |
 | `/gs menu <탭>` · `/gs chest` | 나라 메뉴 탭 바로 열기 / 상자 메뉴 |
+| `/gs districts` | 내 나라(관전 중이면 모든 나라)의 행정구역: 크기, 중심, 중심 광장 여부 |
 | `/gs flag [random]` · `/gs ideology <id>` · `/gs era` | 손에 든 배너를 국기로 / 사상 고르기 / 모든 나라의 시대·무기·에너지·사상 |
 | `/gs admin designs` · `/gs admin design <용도> [slope]` | 설계 전시장 / 지형에 맞춰 하나 짓기 (OP) |
 | `/gs map` · `/gs admin map rebuild` | 전체 화면 세계 지도 (`M` 키) / 지도 타일 처음부터 다시 그리기 (OP) |
@@ -93,7 +94,7 @@
 
 ## 최적화
 
-- 서버: Lithium · FerriteCore · Krypton · ServerCore · C2ME · ScalableLux, 클라이언트: Sodium · Entity Culling · ImmediatelyFast · Lithium · FerriteCore를 권한다(전부 Modrinth).
+- 서버: Lithium · FerriteCore · Krypton · ServerCore · C2ME · ScalableLux, 클라이언트: Sodium · Entity Culling · ImmediatelyFast · Lithium · FerriteCore를 권한다(전부 Modrinth). 셰이더를 쓰려면 Iris(Sodium 0.9.x와 함께).
 - **CrowdPerf**(`crowdperf/`, 별도 모드, 클라이언트 전용): 32칸 밖 주민을 GPU 인스턴스로 그린다. 정점 셰이더가 걷는 다리와 고개를 움직이고, 화면 밖은 보내지 않는다. 시뮬레이션 거리 12청크·주민 약 3,000명에서 최적화 모드만으로 약 300 FPS → CrowdPerf까지 약 3,300~3,700 FPS(작업 지정 화면을 켜면 약 2,500). 설정은 `config/crowdperf.json`, 명령 `/crowdperf`. 자세한 내용은 [crowdperf/README.md](crowdperf/README.md)와 [docs/ROADMAP.md](docs/ROADMAP.md) 1.14·1.15.
 
 ## 세계 지도
@@ -106,7 +107,11 @@
 
 ## 마을 길
 
-길은 저절로 생긴다: 수도 광장 → 건물마다 골목길 → 도시 사이 간선 도로 → 집 지을 자리가 모자라면 새 길. 건물은 길 3칸 안에만 지을 수 있다(성벽 제외). 작업 지정 모드의 `길` 도구로 직접 깔거나 걷어낼 수 있고, 걷어낸 자리는 자동으로 다시 깔지 않는다. 짓는 중인 건물에는 공사 현장 표시(기둥·테이프·고깔·진행률 글자판)가 뜬다. 자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.9.
+길은 저절로 생긴다: 수도 광장 → 건물마다 골목길 → 도시 사이 간선 도로 → 집 지을 자리가 모자라면 새 길. 길은 모두 3칸 너비로 깔고, 예전 1칸 길도 차례로 넓힌다. 건물은 길 3칸 안에만 지을 수 있다(성벽 제외). 작업 지정 모드의 `길` 도구로 직접 깔거나 걷어낼 수 있고, 걷어낸 자리는 자동으로 다시 깔지 않는다. 짓는 중인 건물에는 공사 현장 표시(기둥·테이프·고깔·진행률 글자판)가 뜬다. 자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.9.
+
+## 행정구역
+
+나라 땅은 행정구역으로 나뉜다. 한 구역이 담을 수 있는 청크 수는 행정·물류 연구에 따라 늘고(기본 16, 행정 +4, 물류 +2, 최대 160), 이웃 구역이 다 차면 새로 얻은 땅에 새 행정구역이 생긴다. 4청크 이상 구역은 중심 광장과 간선 도로를 갖고, 새 집이 덜 붐비는 구역부터 지어져 국민이 퍼진다. 나라 메뉴 개요, `/gs districts`, 세계 지도(구역 경계 점선과 이름)에서 본다. 자세한 내용은 [docs/ROADMAP.md](docs/ROADMAP.md) 1.16.
 
 ## 국기와 시대
 

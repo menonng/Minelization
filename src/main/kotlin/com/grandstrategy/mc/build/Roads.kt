@@ -231,6 +231,7 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
             repaveQueue.remove(nation.id)
         }
         val ground = ground()
+        if (widenOld(nation, ground)) return true
         val capitalX = Chunks.x(nation.capital) * 16 + 8
         val capitalZ = Chunks.z(nation.capital) * 16 + 8
         val hub = hub(nation, ground) ?: return stop(if (ground.height(capitalX, capitalZ) == null) "수도가 불러와지지 않음" else "수도 주변에 빈 땅이 없음")
@@ -283,25 +284,61 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
 
     private fun ground() = WorldRoadGround(level) { rt.sim.terrain(it) }
 
-    /** Founds a district when every town core is full (see [Districts]); waits a while after a failed attempt. */
+    /**
+     * Roads laid before roads were three blocks wide get their sides added, one road per planning pass (players'
+     * own roads are left as they drew them). Unfinished ones wait until they are built.
+     */
+    private fun widenOld(nation: Nation, ground: RoadGround): Boolean {
+        if (tuning.width <= 1) return false
+        val narrow = state.roads.values.filter {
+            it.nation == nation.id && !it.wide && it.built && (it.kind == RoadKind.STREET || it.kind == RoadKind.HIGHWAY)
+        }
+        if (narrow.isEmpty()) return false
+        // Several old roads of one kind go into one order (up to about 300 new columns), so a town with hundreds of
+        // narrow streets is widened in tens of orders, not hundreds.
+        val kind = narrow.first().kind
+        val extra = LinkedHashSet<Long>()
+        var count = 0
+        for (road in narrow) {
+            if (road.kind != kind) continue
+            if (count >= 12 || extra.size >= 300) break
+            road.wide = true
+            count++
+            if (road.cells.isEmpty()) continue
+            val xs = road.cells.map { Chunks.x(it) }
+            val zs = road.cells.map { Chunks.z(it) }
+            val range = maxOf(xs.max() - xs.min(), zs.max() - zs.min()) / 2 + 8
+            val blocked = blocker(nation, (xs.min() + xs.max()) / 2, (zs.min() + zs.max()) / 2, range)
+            for (c in RoadPathfinder.widen(road.cells, tuning.width, ground, blocked)) if (!network.isRoad(c)) extra += c
+        }
+        if (extra.isEmpty()) return false
+        lastReason[nation.id] = "옛 길 넓히기 (${count}개, 남은 ${narrow.size - count}개)"
+        return order(nation, kind, extra.toList())
+    }
+
+    /**
+     * Gives each administrative district big enough for one its own town core (see [Districts]): a plaza near its seat
+     * and a highway to the rest of the roads. Waits a while after a failed attempt.
+     */
     private fun district(nation: Nation, ground: RoadGround): Boolean {
-        if (cooling("district:${nation.id}") || !Districts.due(state, nation, tuning)) return false
-        if (newDistrict(nation, ground)) {
+        if (cooling("district:${nation.id}")) return false
+        val district = Districts.needingCore(state, nation).firstOrNull { !cooling("core:${it.id}") } ?: return false
+        if (newDistrict(nation, district, ground)) {
             frontage -= nation.id
-            lastReason[nation.id] = "새 마을 구역"
+            lastReason[nation.id] = "행정구역 ${district.name} 중심 광장"
             return true
         }
-        coolDown("district:${nation.id}", 2400)
+        coolDown("core:${district.id}", 2400)
         return false
     }
 
     /**
-     * Founds a district: picks an own chunk some way out from every town core (towns the nation owns and fertile land
-     * first), lays a plaza at its centre and a highway from there to the network. New houses then prefer it, so people
-     * spread over the land instead of all crowding the capital.
+     * Lays a district's town core: picks a chunk of it (its seat, towns and fertile land first), lays a plaza at its
+     * centre and a highway from there to the network. New houses then prefer it, so people spread over the land
+     * instead of all crowding the capital.
      */
-    private fun newDistrict(nation: Nation, ground: RoadGround): Boolean {
-        val candidates = Districts.candidates(state, nation, tuning, { rt.sim.terrain(it) }) { rt.sim.rng.nextDouble() }.filter { !cooling("dc:$it") }
+    private fun newDistrict(nation: Nation, district: com.grandstrategy.sim.District, ground: RoadGround): Boolean {
+        val candidates = Districts.coreSpots(state, district, { rt.sim.terrain(it) }) { rt.sim.rng.nextDouble() }.filter { !cooling("dc:$it") }
         val own = network.cellsOf(nation.id)
         if (own.isEmpty()) return false
         for (c in candidates.take(4)) {
@@ -327,9 +364,9 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
                 continue
             }
             if (!order(nation, RoadKind.PLAZA, plaza)) continue
-            val wide = RoadPathfinder.widen(path, 2, ground, blocked).filter { !network.isRoad(it) }
+            val wide = RoadPathfinder.widen(path, tuning.width, ground, blocked).filter { !network.isRoad(it) }
             if (wide.isNotEmpty()) order(nation, RoadKind.HIGHWAY, wide)
-            com.grandstrategy.GrandStrategy.LOGGER.info("New district for {} at chunk {}", nation.name, Chunks.format(c))
+            com.grandstrategy.GrandStrategy.LOGGER.info("Town core for {} district {} at chunk {}", nation.name, district.name, Chunks.format(c))
             return true
         }
         return false
@@ -379,7 +416,7 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
             existing = { network.nationAt(it) == nation.id },
             blocked = blocked, range = tuning.streetRange, maxNodes = tuning.streetNodes
         ) ?: return false
-        val fresh = path.filter { !network.isRoad(it) }
+        val fresh = RoadPathfinder.widen(path, tuning.width, ground, blocked).filter { !network.isRoad(it) }
         if (fresh.size < 4) return false
         return order(nation, RoadKind.STREET, fresh)
     }
@@ -504,7 +541,7 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
                 blocked = blocked, range = tuning.streetRange, maxNodes = tuning.streetNodes
             ) ?: continue
             b.linked = true
-            val fresh = path.filter { !network.isRoad(it) }
+            val fresh = RoadPathfinder.widen(path, tuning.width, ground, blocked).filter { !network.isRoad(it) }
             if (fresh.isEmpty()) return false
             return order(nation, RoadKind.STREET, fresh)
         }
@@ -561,7 +598,7 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
             coolDown(key, 6000)
             return false
         }
-        val wide = RoadPathfinder.widen(path, 2, ground, blocked).filter { !network.isRoad(it) }
+        val wide = RoadPathfinder.widen(path, tuning.width, ground, blocked).filter { !network.isRoad(it) }
         coolDown(key, 1200)
         if (wide.isEmpty()) return false
         return order(nation, RoadKind.HIGHWAY, wide)
@@ -569,6 +606,7 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
 
     private fun order(nation: Nation, kind: RoadKind, cells: List<Long>, by: String? = null, conscript: Boolean = false): Boolean {
         val road = network.add(nation.id, kind, cells) ?: return false
+        road.wide = true
         work.orderRoad(nation, road, by, conscript)
         planned++
         com.grandstrategy.GrandStrategy.LOGGER.info("Road planned for {}: {} with {} cells", nation.name, kind, road.cells.size)
@@ -626,8 +664,10 @@ class RoadPlanner(private val rt: Runtime, private val work: WorkManager) {
             val why = lastReason[n.id]?.let { " · 마지막 판단: $it" } ?: ""
             val hubs = Districts.hubs(state, n)
             val crowds = hubs.joinToString("/") { Districts.crowd(state, n, it, tuning.districtRadius).toString() }
-            "${n.name}: 길 ${roads.size}개 (${roads.sumOf { it.cells.size }}칸, 완공 $built) · 주문 ${state.orders.values.count { it.nation == n.id && it.type == WorkType.ROAD }}" +
-                " · 구역 ${hubs.size}/${Districts.allowed(n, tuning)} (건물 $crowds, 기준 ${tuning.districtBuildings})$why"
+            val districts = Districts.ofNation(state, n)
+            val narrow = roads.count { !it.wide && it.kind != RoadKind.MANUAL && it.kind != RoadKind.PLAZA }
+            "${n.name}: 길 ${roads.size}개 (${roads.sumOf { it.cells.size }}칸, 완공 $built, 안 넓힌 길 $narrow) · 주문 ${state.orders.values.count { it.nation == n.id && it.type == WorkType.ROAD }}" +
+                " · 행정구역 ${districts.size}개 (구역당 ${Districts.limit(n)}청크, 중심 광장 ${hubs.size}, 광장별 건물 $crowds)$why"
         }
         val head = "길 ${state.roads.size}개 · ${network.cellCount}칸 · 계획 $planned · 실패 $failed · 금지 칸 ${state.roadBans.size}"
         return (listOf(head) + lines).joinToString("\n")
